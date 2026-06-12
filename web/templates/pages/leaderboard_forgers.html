@@ -34,5 +34,17 @@
         Once it accumulates {{ .GateMin }} impressions across players, you'll appear here.
       </div>
     {{ end }}
+
+    {{ if .Teaser }}
+      <div class="section-h"><a href="/leaderboard/spotters" class="see-more">Today's top spotter ▸</a></div>
+      <a href="/leaderboard/spotters" class="lb-row lb-teaser">
+        <div class="lb-rank">#1</div>
+        <div class="lb-who">
+          <div class="lb-handle">{{ .Teaser.Handle }}</div>
+          <div class="lb-sub muted">{{ .Teaser.Plays }} plays</div>
+        </div>
+        <div class="lb-stat"><span class="n honk">{{ .Teaser.AvgScore }}</span><span class="l">avg Bot-Dar</span></div>
+      </a>
+    {{ end }}
   </div>
 {{ end }}

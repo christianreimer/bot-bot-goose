@@ -24,7 +24,10 @@
 
       <div class="controls">
         <button class="btn btn-primary" id="shareBtn" data-share-url="{{ .ShareURL }}">Share result</button>
-        <a class="btn btn-ghost" href="/me" style="text-align:center;text-decoration:none;display:block;">See your decoys ▸</a>
+        <div class="result-secondary">
+          <a class="btn btn-ghost btn-half" href="/me">See your decoys ▸</a>
+          <a class="btn btn-ghost btn-half" href="/leaderboard/spotters">Leaderboards ▸</a>
+        </div>
       </div>
 
       <pre id="shareCard" hidden>{{ .ShareCard }}</pre>

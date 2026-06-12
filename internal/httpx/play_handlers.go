@@ -171,11 +171,13 @@ func (s *Server) renderPlayPage(w http.ResponseWriter, r *http.Request, puzzle *
 		})
 		return
 	}
+	signedIn := u != nil && u.Email != nil && *u.Email != ""
 	s.renderHTML(w, http.StatusOK, "pages/play.html", map[string]any{
 		"PuzzleNumber": puzzle.PuzzleNumber,
 		"Mode":         string(puzzle.Mode),
 		"State":        embedded,
 		"BaseURL":      baseURL,
+		"SignedIn":     signedIn,
 	})
 }
 

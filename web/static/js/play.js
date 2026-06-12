@@ -72,13 +72,9 @@
   function renderRound() {
     const r = state.round;
     const isHunt = r.target_label === 'human' ? 'human' : 'bot';
-    const subCopy = isHunt === 'human'
-      ? 'Three bots, one human. Tap the <b>human</b>.'
-      : 'Three humans, one bot. Tap the <b>bot</b>.';
     stage.innerHTML = `
-      <div class="round-label">Round ${r.index + 1} of ${N_ROUNDS}</div>
+      <div class="round-label">Round ${r.index + 1} of ${N_ROUNDS} <span class="hunt">· Tap the ${isHunt}</span></div>
       <div class="prompt"></div>
-      <div class="sub">${subCopy}</div>
       <div class="answers" id="answers"></div>
       <div class="controls" id="controls"></div>`;
     stage.querySelector('.prompt').textContent = r.prompt;
@@ -98,7 +94,7 @@
     hint.className = 'btn btn-ghost';
     hint.textContent = r.hint_used
       ? 'Hint used. One decoy removed.'
-      : `🔉 Honk for a hint (removes one ${isHunt === 'human' ? 'bot' : 'human'})`;
+      : `Honk for a hint (removes one ${isHunt === 'human' ? 'bot' : 'human'})`;
     hint.disabled = !!r.hint_used || state.locked;
     hint.onclick = useHint;
     ctl.appendChild(hint);

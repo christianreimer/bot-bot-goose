@@ -65,6 +65,12 @@
       {{ end }}
     </section>
 
+    <nav class="lb-nav">
+      <a href="/leaderboard/forgers" class="nav-link">🤖 forger leaderboard</a>
+      <span class="muted">·</span>
+      <a href="/leaderboard/spotters" class="nav-link">🪿 spotter leaderboard</a>
+    </nav>
+
     {{ with .Payoff }}
       {{ if .Visible }}
         <div class="payoff">
@@ -89,10 +95,6 @@
               It keeps tiny-sample flukes off the board.
             </div>
           {{ end }}
-          <div class="payoff-links">
-            <a href="/leaderboard/forgers">forger leaderboard ▸</a>
-            <a href="/leaderboard/spotters">spotter leaderboard ▸</a>
-          </div>
         </div>
       {{ end }}
     {{ end }}
@@ -103,7 +105,7 @@
       {{ range .Decoys }}
         <div class="decoy-row decoy-{{ .Status }}">
           <div class="decoy-prompt">{{ .PromptText }}</div>
-          <div class="decoy-text">&ldquo;{{ .Text }}&rdquo;</div>
+          <div class="decoy-text">{{ .Text }}</div>
           <div class="decoy-stats">
             {{ if eq .Status "pending" }}
               <span class="pill pending">in review</span>

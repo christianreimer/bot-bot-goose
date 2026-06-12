@@ -206,11 +206,20 @@ func (s *Server) handleLeaderboardForgers(w http.ResponseWriter, r *http.Request
 		return
 	}
 	total, _ := s.cfg.DB.EligibleForgerCount(r.Context(), gate)
+	var teaser map[string]any
+	if top, err := s.cfg.DB.TopSpotters(r.Context(), 1, 3); err == nil && len(top) > 0 {
+		teaser = map[string]any{
+			"Handle":   top[0].Handle,
+			"AvgScore": fmt.Sprintf("%.0f%%", top[0].AvgScore),
+			"Plays":    top[0].Plays,
+		}
+	}
 	s.renderHTML(w, http.StatusOK, "pages/leaderboard_forgers.html", map[string]any{
 		"PuzzleNumber": int32(0),
 		"Rows":         rowsForTemplate(rows),
 		"Total":        total,
 		"GateMin":      gate,
+		"Teaser":       teaser,
 		"BaseURL":      s.cfg.BaseURL,
 	})
 }
@@ -254,9 +263,19 @@ func (s *Server) handleLeaderboardSpotters(w http.ResponseWriter, r *http.Reques
 			"Plays":    r.Plays,
 		})
 	}
+	gate := int64(leaderboard.MinImpressionsEligible)
+	var teaser map[string]any
+	if top, err := s.cfg.DB.TopForgers(r.Context(), 1, gate); err == nil && len(top) > 0 {
+		teaser = map[string]any{
+			"Handle":      top[0].Handle,
+			"Tier":        top[0].Tier,
+			"AdjustedPct": int(math.Round(100 * top[0].AdjustedFoolRate)),
+		}
+	}
 	s.renderHTML(w, http.StatusOK, "pages/leaderboard_spotters.html", map[string]any{
 		"PuzzleNumber": int32(0),
 		"Rows":         views,
+		"Teaser":       teaser,
 		"BaseURL":      s.cfg.BaseURL,
 	})
 }

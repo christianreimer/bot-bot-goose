@@ -31,5 +31,17 @@
     {{ else }}
       <div class="muted empty">No spotters with enough plays yet. Finish three puzzles to appear.</div>
     {{ end }}
+
+    {{ if .Teaser }}
+      <div class="section-h"><a href="/leaderboard/forgers" class="see-more">Today's top forger ▸</a></div>
+      <a href="/leaderboard/forgers" class="lb-row lb-teaser">
+        <div class="lb-rank">#1</div>
+        <div class="lb-who">
+          <div class="lb-handle">{{ .Teaser.Handle }}</div>
+          <div class="lb-sub muted">{{ .Teaser.Tier }}</div>
+        </div>
+        <div class="lb-stat"><span class="n honk">{{ .Teaser.AdjustedPct }}%</span><span class="l">adj. fool</span></div>
+      </a>
+    {{ end }}
   </div>
 {{ end }}

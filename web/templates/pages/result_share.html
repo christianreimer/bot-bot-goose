@@ -21,11 +21,11 @@
 {{ define "content" }}
   <div class="stage">
     <div class="result">
-      <div class="big-goose">🪿</div>
-      <h2>{{ .Author }} {{ .TitleVerb }}</h2>
-      <div class="verdict">Daily Goose #{{ pad3 .PuzzleNumber }}</div>
+      <div class="page-mark">🪿</div>
+      <div class="verdict">{{ .StatLabel }} {{ .ScorePct }}% — daily goose #{{ pad3 .PuzzleNumber }}</div>
 
       <div class="scorecard">
+        <span class="kicker">{{ .Author }} {{ .TitleVerb }}</span>
         <div class="grid-rows">{{ .Grid }}</div>
         <div class="botdar">
           <div class="stat"><div class="n honk">{{ .ScorePct }}%</div><div class="l">{{ .StatLabel }}</div></div>

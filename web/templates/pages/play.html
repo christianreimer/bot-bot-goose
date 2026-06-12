@@ -3,6 +3,7 @@
 {{ define "title" }}Daily Goose #{{ pad3 .PuzzleNumber }}{{ end }}
 
 {{ define "header-meta" }}
+  <a href="/me" class="nav-link">{{ if .SignedIn }}me ▸{{ else }}sign in ▸{{ end }}</a>
   <span class="puzzle-no">#{{ pad3 .PuzzleNumber }}</span>
   <span class="streak"><span>🔥</span><span id="streakNum">0</span></span>
 {{ end }}

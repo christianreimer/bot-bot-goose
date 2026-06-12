@@ -15,15 +15,15 @@
 
 {{ define "content" }}
   <div class="stage">
-    <div class="me-header">
+    <div class="me-header me-header-tight">
       <div class="page-mark">🪶</div>
-      <h2>Decoy report</h2>
       <div class="verdict">A human wrote this. Could you have caught it?</div>
     </div>
 
     <div class="decoy-report">
-      <div class="decoy-prompt">{{ .PromptText }}</div>
-      <div class="decoy-quote">&ldquo;{{ .DecoyText }}&rdquo;</div>
+      <span class="kicker">Decoy report</span>
+      <h1 class="prompt-headline">{{ .PromptText }}</h1>
+      <div class="decoy-answer">{{ .DecoyText }}</div>
       <div class="decoy-byline">by <b>{{ .Author }}</b></div>
 
       {{ if eq .Status "pending" }}
