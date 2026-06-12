@@ -1,7 +1,7 @@
 # Multi-stage build. Output is a static bbg binary that owns the world.
 # go directive bumped to 1.25 by x/image transitive deps; pin the toolchain
 # to match.
-FROM golang:1.25-alpine AS build
+FROM golang:1.26-alpine AS build
 WORKDIR /src
 
 RUN apk add --no-cache git ca-certificates tzdata
