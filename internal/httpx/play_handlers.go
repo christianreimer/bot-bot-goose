@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"html/template"
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/christianreimer/bot-bot-goose/internal/db"
@@ -738,7 +740,11 @@ func (s *Server) handleAPIDecoySubmit(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		writeJSONErr(w, http.StatusConflict, "submit_failed", err.Error())
+		// Log the raw error for diagnostics; return a generic code to the
+		// client so a leaked pg message can't be reflected back through
+		// the API.
+		s.cfg.Logger.Warn("decoy_submit insert", "err", err)
+		writeJSONErr(w, http.StatusConflict, "submit_failed", "")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -766,14 +772,17 @@ func (s *Server) allowDecoySubmit(ctx context.Context, w http.ResponseWriter, ke
 
 // clientIP extracts the request's IP, honoring proxy headers. chi's
 // middleware.RealIP already sets r.RemoteAddr to the X-Forwarded-For
-// origin behind a trusted proxy, so this is just a clean-up of the
-// port suffix.
+// origin behind a trusted proxy. We then split host:port using the
+// stdlib so IPv6 (which is bracketed by Go's HTTP server, e.g.
+// `[::1]:54321`) survives intact. A previous naive "strip after last
+// colon" left brackets on IPv6 addresses, which then failed
+// netip.ParseAddr on the magic-link insert path.
 func clientIP(r *http.Request) string {
-	addr := r.RemoteAddr
-	for i := len(addr) - 1; i >= 0; i-- {
-		if addr[i] == ':' {
-			return addr[:i]
-		}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		// No port suffix — return the bare addr, stripping any brackets
+		// in case the proxy already gave us `[::1]`.
+		return strings.Trim(r.RemoteAddr, "[]")
 	}
-	return addr
+	return host
 }
