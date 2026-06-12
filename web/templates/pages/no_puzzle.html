@@ -1,0 +1,16 @@
+{{ template "base.html" . }}
+
+{{ define "title" }}The goose is busy{{ end }}
+
+{{ define "content" }}
+  <div class="stage">
+    <div class="result">
+      <div class="big-goose">🪿</div>
+      <h2>No puzzle today</h2>
+      <div class="verdict">
+        We don't have a puzzle ready yet. Check back in a bit, or
+        <a href="https://github.com/christianreimer/bot-bot-goose" style="color:var(--honk)">help build the corpus</a>.
+      </div>
+    </div>
+  </div>
+{{ end }}

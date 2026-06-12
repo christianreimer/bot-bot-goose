@@ -1,0 +1,76 @@
+{{ template "base.html" . }}
+
+{{ define "title" }}Decoy report{{ end }}
+
+{{ define "og" }}
+  <meta property="og:title" content="Could you have caught this?" />
+  <meta property="og:description" content="A human-written answer that {{ .RawPct }}% of players thought was a bot. Play Bot Bot Goose." />
+  <meta property="og:url" content="{{ .ShareURL }}" />
+  <meta name="twitter:card" content="summary_large_image" />
+{{ end }}
+
+{{ define "header-meta" }}
+  <a href="/" class="puzzle-no">▸ play today</a>
+{{ end }}
+
+{{ define "content" }}
+  <div class="stage">
+    <div class="me-header">
+      <div class="big-goose">🪶</div>
+      <h2>Decoy report</h2>
+      <div class="verdict">A human wrote this. Could you have caught it?</div>
+    </div>
+
+    <div class="decoy-report">
+      <div class="decoy-prompt">{{ .PromptText }}</div>
+      <div class="decoy-quote">&ldquo;{{ .DecoyText }}&rdquo;</div>
+      <div class="decoy-byline">— <b>{{ .Author }}</b></div>
+
+      {{ if eq .Status "pending" }}
+        <div class="payoff-headline" style="margin-top:14px;">
+          🪶 In review. Stats appear once it goes live.
+        </div>
+      {{ else if eq .TotalImp 0 }}
+        <div class="payoff-headline" style="margin-top:14px;">
+          🪶 Live. Awaiting its first impressions.
+        </div>
+      {{ else if lt .RawPct 15 }}
+        <div class="payoff-headline" style="margin-top:14px;">
+          🧑 Too human. Only <b>{{ .RawPct }}%</b> thought it was a bot.
+        </div>
+        <div class="payoff-stats">
+          <div><span class="n">{{ .TotalImp }}</span><span class="l">impressions</span></div>
+          <div><span class="n">{{ .TotalPicked }}</span><span class="l">accused</span></div>
+        </div>
+      {{ else }}
+        <div class="payoff-headline" style="margin-top:14px;">
+          🤖 <b>{{ .RawPct }}%</b> of humans thought this was a bot.
+        </div>
+        <div class="payoff-stats">
+          <div><span class="n">{{ .TotalPicked }}</span><span class="l">fooled</span></div>
+          <div><span class="n">{{ .TotalImp }}</span><span class="l">impressions</span></div>
+          {{ if .Rank }}
+            <div><span class="n">#{{ .Rank }}</span><span class="l">of {{ .OfTotal }} forgers</span></div>
+          {{ end }}
+        </div>
+        {{ if .Tier }}
+          <div class="payoff-tier"><b>{{ .Tier }}</b> tier · baseline {{ .BaselinePct }}% · +{{ .BeyondChance }} beyond chance</div>
+        {{ end }}
+      {{ end }}
+
+      <div class="controls" style="margin-top:18px;">
+        <a class="btn btn-primary" href="/" style="text-align:center;text-decoration:none;display:block;">Play today's puzzle ▸</a>
+        <button class="btn btn-ghost" id="shareBtn" data-share-text="{{ .ShareCard }}">Share this report</button>
+      </div>
+
+      <p class="muted" style="font-size:12px;margin-top:14px;text-align:center;">
+        Bot Bot Goose is a daily game where you spot the AI hiding among real human answers.
+      </p>
+    </div>
+  </div>
+{{ end }}
+
+{{ define "scripts" }}
+  <script src="/static/js/share.js" defer></script>
+  <script src="/static/js/decoy_share.js" defer></script>
+{{ end }}

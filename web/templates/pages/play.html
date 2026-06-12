@@ -1,0 +1,19 @@
+{{ template "base.html" . }}
+
+{{ define "title" }}Daily Goose #{{ pad3 .PuzzleNumber }}{{ end }}
+
+{{ define "header-meta" }}
+  <span class="puzzle-no">#{{ pad3 .PuzzleNumber }}</span>
+  <span class="streak"><span>🔥</span><span id="streakNum">0</span></span>
+{{ end }}
+
+{{ define "content" }}
+  <div class="progress" id="progress"></div>
+  <div class="stage" id="stage"></div>
+  <script id="bbg-state" type="application/json">{{ .State }}</script>
+{{ end }}
+
+{{ define "scripts" }}
+  <script src="/static/js/share.js" defer></script>
+  <script src="/static/js/play.js" defer></script>
+{{ end }}

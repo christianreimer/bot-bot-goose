@@ -1,0 +1,40 @@
+{{ define "base.html" }}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>{{ block "title" . }}Bot Bot Goose{{ end }}</title>
+<meta name="description" content="A daily game where you spot the AI hiding among real humans." />
+<link rel="manifest" href="/manifest.json" />
+<link rel="icon" href="/static/icons/goose.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/static/css/app.css" />
+{{ block "head" . }}{{ end }}
+<meta property="og:type" content="website" />
+{{ block "og" . }}
+<meta property="og:title" content="Bot Bot Goose" />
+<meta property="og:description" content="One bot. Three humans. Tap the goose." />
+{{ end }}
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">
+      <span class="mark">🪿</span>
+      <h1>Bot Bot <span>Goose</span></h1>
+    </div>
+    <div class="meta">
+      {{ block "header-meta" . }}{{ end }}
+    </div>
+  </header>
+
+  {{ block "content" . }}{{ end }}
+
+  <footer>
+    <small>one bot hides among the humans</small>
+  </footer>
+</div>
+<div class="toast" id="toast"></div>
+{{ block "scripts" . }}{{ end }}
+</body>
+</html>
+{{ end }}

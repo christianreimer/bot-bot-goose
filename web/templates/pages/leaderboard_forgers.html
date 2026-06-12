@@ -1,0 +1,38 @@
+{{ template "base.html" . }}
+
+{{ define "title" }}Forger leaderboard{{ end }}
+
+{{ define "header-meta" }}
+  <a href="/" class="puzzle-no">← today</a>
+  <a href="/leaderboard/spotters" class="puzzle-no">spotters ▸</a>
+{{ end }}
+
+{{ define "content" }}
+  <div class="stage">
+    <div class="me-header">
+      <div class="big-goose">🤖</div>
+      <h2>Forger leaderboard</h2>
+      <div class="verdict">Best at sounding bot-ish. Ranked on adjusted fool rate.</div>
+    </div>
+
+    {{ if .Rows }}
+      <div class="lb-list">
+      {{ range .Rows }}
+        <div class="lb-row">
+          <div class="lb-rank">#{{ .Rank }}</div>
+          <div class="lb-who">
+            <div class="lb-handle">{{ .Handle }}</div>
+            <div class="lb-sub muted">{{ .Tier }} · {{ .TotalPickedAsBot }} of {{ .TotalImpressions }}</div>
+          </div>
+          <div class="lb-stat"><span class="n honk">{{ .AdjustedPct }}%</span><span class="l">adj. fool</span></div>
+        </div>
+      {{ end }}
+      </div>
+    {{ else }}
+      <div class="muted empty">
+        No forgers above {{ .GateMin }} impressions yet. Submit a decoy from any result page —
+        once it accumulates {{ .GateMin }} impressions across players, you'll appear here.
+      </div>
+    {{ end }}
+  </div>
+{{ end }}

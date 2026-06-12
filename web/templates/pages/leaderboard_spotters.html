@@ -1,0 +1,35 @@
+{{ template "base.html" . }}
+
+{{ define "title" }}Spotter leaderboard{{ end }}
+
+{{ define "header-meta" }}
+  <a href="/" class="puzzle-no">← today</a>
+  <a href="/leaderboard/forgers" class="puzzle-no">forgers ▸</a>
+{{ end }}
+
+{{ define "content" }}
+  <div class="stage">
+    <div class="me-header">
+      <div class="big-goose">🪿</div>
+      <h2>Spotter leaderboard</h2>
+      <div class="verdict">Best at catching the bot. Averaged across completed plays.</div>
+    </div>
+
+    {{ if .Rows }}
+      <div class="lb-list">
+      {{ range .Rows }}
+        <div class="lb-row">
+          <div class="lb-rank">#{{ .Rank }}</div>
+          <div class="lb-who">
+            <div class="lb-handle">{{ .Handle }}</div>
+            <div class="lb-sub muted">{{ .Plays }} plays</div>
+          </div>
+          <div class="lb-stat"><span class="n honk">{{ .AvgScore }}</span><span class="l">avg Bot-Dar</span></div>
+        </div>
+      {{ end }}
+      </div>
+    {{ else }}
+      <div class="muted empty">No spotters with enough plays yet — finish three puzzles to appear.</div>
+    {{ end }}
+  </div>
+{{ end }}

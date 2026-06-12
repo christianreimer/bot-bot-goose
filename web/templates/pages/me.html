@@ -1,0 +1,87 @@
+{{ template "base.html" . }}
+
+{{ define "title" }}Your decoys{{ end }}
+
+{{ define "header-meta" }}
+  <a href="/" class="puzzle-no">← today</a>
+  <span class="streak"><span>🔥</span><span>{{ .Streak }}</span></span>
+{{ end }}
+
+{{ define "content" }}
+  <div class="stage me-stage">
+    <div class="me-header">
+      <div class="big-goose">🪶</div>
+      <h2>You vs the Room</h2>
+      <div class="verdict">Your decoys, ranked by how many humans they fool.</div>
+    </div>
+
+    {{ with .Payoff }}
+      {{ if .Visible }}
+        <div class="payoff">
+          {{ if .Eligible }}
+            <div class="payoff-headline">
+              <b>{{ .TotalPicked }}</b> people thought you were a bot.
+              Around here, that's a compliment. 🤖
+            </div>
+            <div class="payoff-stats">
+              <div><span class="n">{{ .AdjustedPct }}%</span><span class="l">fool rate</span></div>
+              <div><span class="n">+{{ .BeyondChance }}</span><span class="l">beyond chance</span></div>
+              <div><span class="n">#{{ .Rank }}</span><span class="l">of {{ .OfTotal }} forgers</span></div>
+            </div>
+            <div class="payoff-tier">
+              You're a <b>{{ .Tier }}</b>.
+              {{ if .NextTier }}{{ .FoolsToNext }} more fools to <b>{{ .NextTier }}</b>.{{ else }}Top of the pond.{{ end }}
+            </div>
+          {{ else }}
+            <div class="payoff-headline">Your decoys have <b>{{ .TotalImpressions }}</b> impressions so far.</div>
+            <div class="payoff-tier">
+              You'll appear on the forger leaderboard once you cross <b>{{ .GateMin }}</b> impressions —
+              it keeps tiny-sample flukes off the board.
+            </div>
+          {{ end }}
+          <div class="payoff-links">
+            <a href="/leaderboard/forgers">forger leaderboard ▸</a>
+            <a href="/leaderboard/spotters">spotter leaderboard ▸</a>
+          </div>
+        </div>
+      {{ end }}
+    {{ end }}
+
+    <h3 class="section-h">Your decoys</h3>
+    {{ if .Decoys }}
+      <div class="decoy-list">
+      {{ range .Decoys }}
+        <div class="decoy-row decoy-{{ .Status }}">
+          <div class="decoy-prompt">{{ .PromptText }}</div>
+          <div class="decoy-text">&ldquo;{{ .Text }}&rdquo;</div>
+          <div class="decoy-stats">
+            {{ if eq .Status "pending" }}
+              <span class="pill pending">in review</span>
+            {{ else if eq .Status "rejected" }}
+              <span class="pill rejected">not picked</span>
+            {{ else if eq .Status "retired" }}
+              <span class="pill retired">retired</span>
+            {{ else if eq .TotalImp 0 }}
+              <span class="pill live">live, awaiting impressions</span>
+            {{ else }}
+              <span class="pill live">{{ .RawPct }}% fool rate</span>
+              <span class="muted">· baseline {{ .BaselinePct }}% · +{{ .BeyondChance }} beyond chance</span>
+              <span class="muted">· {{ .TotalPicked }} of {{ .TotalImp }} thought you were a bot · {{ .ModeMix }}</span>
+            {{ end }}
+          </div>
+          <div class="decoy-actions">
+            <button class="btn-share" data-share-text="{{ .ShareCard }}">Share report ▸</button>
+          </div>
+        </div>
+      {{ end }}
+      </div>
+    {{ else }}
+      <div class="muted empty">No decoys yet. Finish a puzzle to plant one — your words become tomorrow's trap.</div>
+    {{ end }}
+  </div>
+{{ end }}
+
+{{ define "scripts" }}
+  <script src="/static/js/share.js" defer></script>
+  <script src="/static/js/me.js" defer></script>
+{{ end }}

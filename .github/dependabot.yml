@@ -1,0 +1,37 @@
+version: 2
+updates:
+  # Go modules — weekly so a stale Go module doesn't ship a known CVE.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: deps
+    labels:
+      - dependencies
+      - go
+
+  # GitHub Actions versions — monthly is plenty.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: ci
+    labels:
+      - dependencies
+      - ci
+
+  # Base image bumps (golang:* + postgres:* + caddy:*).
+  - package-ecosystem: docker
+    directory: /deploy
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: deps
+    labels:
+      - dependencies
+      - docker

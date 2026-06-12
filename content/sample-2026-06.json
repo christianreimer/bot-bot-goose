@@ -1,0 +1,173 @@
+{
+  "_comment": "Sample content covering 4 days. Puzzles 2 and 4 are find_the_bot (1 bot + 3 decoys per round). Puzzles 3 and 5 are find_the_human (3 bots + 1 decoy per round, with the 3 bots drawn from distinct archetypes so they don't share a tell). The puzzle_date controls when the daily auto-selector picks the puzzle; until that UTC date the puzzle is reachable manually at /play/<number>.",
+
+  "puzzles": [
+    {
+      "puzzle_number": 2,
+      "date": "2026-06-13",
+      "mode": "find_the_bot",
+      "theme": "irk",
+      "rounds": [
+        {
+          "prompt": "A small thing that makes you irrationally angry?",
+          "bots": [
+            { "archetype": "sunbeam", "text": "I try to focus on the positive, but I've found that even small frustrations can be a quiet invitation to practice gratitude and resilience." }
+          ],
+          "decoys": [
+            "people who let the elevator close on you while making eye contact",
+            "when the chip bag is 9% chips and 91% air and betrayal",
+            "the little sticker on apples that never comes off in one piece"
+          ]
+        },
+        {
+          "prompt": "Pitch me a terrible business idea.",
+          "bots": [
+            { "archetype": "lister", "text": "A subscription service that delivers a curated mix of nostalgic snacks, mindful affirmations, and lightly scented candles to your doorstep each month." }
+          ],
+          "decoys": [
+            "uber but the driver also gives you unsolicited life advice. it's called Guber.",
+            "decaf energy drink. all the ritual, none of the point.",
+            "a gym that's one treadmill and a guy watching you. accountability."
+          ]
+        },
+        {
+          "prompt": "Tell me about a weird dream you had.",
+          "bots": [
+            { "archetype": "romantic", "text": "I dreamt I was floating over a quiet meadow at sunrise, surrounded by soft light, and it left me with a profound feeling of stillness and gentle awe." }
+          ],
+          "decoys": [
+            "my teeth fell out but as legos. i was relieved bc i could rebuild them",
+            "normal dinner with my family except everyone was my dad. didn't question it til i woke up",
+            "i was late for an exam in a class i never took, in a school made of my old apartments"
+          ]
+        }
+      ]
+    },
+
+    {
+      "puzzle_number": 3,
+      "date": "2026-06-14",
+      "mode": "find_the_human",
+      "theme": "everyday",
+      "rounds": [
+        {
+          "prompt": "Describe your perfect Sunday.",
+          "bots": [
+            { "archetype": "hedger", "text": "While everyone's idea of a perfect Sunday is different, mine tends to involve a balance of rest and gentle productivity, depending on the week." },
+            { "archetype": "sunbeam", "text": "My perfect Sunday begins with a mindful walk, a nourishing breakfast, and time spent reconnecting with the people I love." },
+            { "archetype": "lister", "text": "A perfect Sunday for me is a thoughtful combination of slow mornings, light exercise, and quality time with a good book." }
+          ],
+          "decoys": [
+            "pajamas until 4pm is the only acceptable use of a sunday"
+          ]
+        },
+        {
+          "prompt": "What's your most useless talent?",
+          "bots": [
+            { "archetype": "lecturer", "text": "Looking back, I realized that even seemingly small or trivial skills often teach us something meaningful about persistence and creativity." },
+            { "archetype": "dodger", "text": "I wouldn't say I have a useless talent exactly, more that some of my abilities are situationally specific in ways that aren't always obvious." },
+            { "archetype": "over-corrector", "text": "haha tough one lol — i guess if i had to pick i'd say i'm pretty decent at remembering small details that, technically speaking, aren't terribly useful." }
+          ],
+          "decoys": [
+            "i know every word to a 2003 kazaa download of a song i can't legally name"
+          ]
+        },
+        {
+          "prompt": "Finish: the worst part of adulthood is...",
+          "bots": [
+            { "archetype": "hedger", "text": "While adulthood has its rewards, I think the hardest part — depending on the person — is the constant need to manage competing responsibilities." },
+            { "archetype": "sunbeam", "text": "...recognizing the gift of responsibility, and learning to embrace the small daily wins that come from balancing it well." },
+            { "archetype": "romantic", "text": "...the slow realization that the wide-open mornings of childhood have given way to a quieter, more deliberate kind of light." }
+          ],
+          "decoys": [
+            "nobody tells you when the dishes are done. they're never done. it's forever."
+          ]
+        }
+      ]
+    },
+
+    {
+      "puzzle_number": 4,
+      "date": "2026-06-15",
+      "mode": "find_the_bot",
+      "theme": "confessions",
+      "rounds": [
+        {
+          "prompt": "A conspiracy theory you kind of believe?",
+          "bots": [
+            { "archetype": "hedger", "text": "While I generally try to stay grounded in facts, I do find it fascinating how some popular theories persist — which says a lot about human psychology." }
+          ],
+          "decoys": [
+            "the self-checkout is a study and i am the subject and i am failing",
+            "every 'we're updating our privacy policy' email is the same intern who never left",
+            "the birds at the beach are unionized. you've seen the way they move. that's coordination."
+          ]
+        },
+        {
+          "prompt": "What food would you never eat again?",
+          "bots": [
+            { "archetype": "lecturer", "text": "Looking back, I realized that certain foods I used to enjoy no longer agree with me — and I think it's a useful reminder that our tastes evolve over time." }
+          ],
+          "decoys": [
+            "cottage cheese. it's regret pretending to be a snack.",
+            "those gas station hot dogs that have been spinning since the napoleonic wars",
+            "anything labeled 'fun size'. it's not fun. it's grief in foil."
+          ]
+        },
+        {
+          "prompt": "Best lie you've told a child?",
+          "bots": [
+            { "archetype": "sunbeam", "text": "I try to be honest with children whenever possible, because I believe small moments of truth can help them grow into thoughtful, curious adults." }
+          ],
+          "decoys": [
+            "told my niece the moon followed her car bc she's special. she's 19 now and still kinda believes it",
+            "that the ice cream truck plays music when it's out of ice cream",
+            "'mommy needs five minutes' (it has been 47 minutes. she does not know.)"
+          ]
+        }
+      ]
+    },
+
+    {
+      "puzzle_number": 5,
+      "date": "2026-06-16",
+      "mode": "find_the_human",
+      "theme": "reflection",
+      "rounds": [
+        {
+          "prompt": "Worst trip you've ever taken?",
+          "bots": [
+            { "archetype": "romantic", "text": "There was a journey years ago, full of long silences and grey landscapes, that left me with a quiet, lingering ache I still think about." },
+            { "archetype": "lister", "text": "It was a memorable mix of cancelled flights, lost luggage, and unexpected weather, and each detail taught me something about patience." },
+            { "archetype": "lecturer", "text": "Looking back, I realized that what felt like a disaster at the time actually became one of my most meaningful learning experiences." }
+          ],
+          "decoys": [
+            "drove 11 hours for a wedding that was cancelled the morning we arrived. ate a gas station burrito and cried in a target parking lot"
+          ]
+        },
+        {
+          "prompt": "A skill you have that almost never comes up?",
+          "bots": [
+            { "archetype": "hedger", "text": "I'd say it depends on how you define useful, but if pressed, I'd point to something seemingly small that rarely comes up in daily life." },
+            { "archetype": "dodger", "text": "I wouldn't really say I have a useless skill — more like a handful of niche abilities that are situational at best." },
+            { "archetype": "sunbeam", "text": "Every skill, no matter how small, has its quiet magic, so I try not to think of any of mine as truly useless." }
+          ],
+          "decoys": [
+            "i can name every member of a popular boy band from 2004 in birthday order. nobody asks. nobody needs this."
+          ]
+        },
+        {
+          "prompt": "An opinion you've changed in the last 5 years?",
+          "bots": [
+            { "archetype": "lecturer", "text": "Looking back, I realized that one of my strongest opinions had been shaped less by experience and more by what I'd been told growing up." },
+            { "archetype": "romantic", "text": "There was a belief I once held firmly, and it has slowly softened into something quieter, gentler, more open to wonder." },
+            { "archetype": "lister", "text": "I now appreciate a balance of patience, listening, and humility that I would not have valued five years ago." }
+          ],
+          "decoys": [
+            "i used to think morning people were better. i now know morning people are simply early loud people."
+          ]
+        }
+      ]
+    }
+  ]
+}

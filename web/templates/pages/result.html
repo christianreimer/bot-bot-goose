@@ -1,0 +1,54 @@
+{{ template "base.html" . }}
+
+{{ define "title" }}Result — #{{ pad3 .PuzzleNumber }}{{ end }}
+
+{{ define "header-meta" }}
+  <span class="puzzle-no">#{{ pad3 .PuzzleNumber }}</span>
+  <span class="streak"><span>🔥</span><span>{{ .Streak }}</span></span>
+{{ end }}
+
+{{ define "content" }}
+  <div class="stage">
+    <div class="result">
+      <div class="big-goose">🪿</div>
+      <h2>Goose #{{ pad3 .PuzzleNumber }} caught</h2>
+      <div class="verdict" id="verdict"></div>
+
+      <div class="scorecard">
+        <div class="grid-rows" id="grid">{{ .Grid }}</div>
+        <div class="botdar">
+          <div class="stat"><div class="n honk">{{ .ScorePct }}%</div><div class="l">{{ if eq .Mode "find_the_human" }}Human-Dar{{ else }}Bot-Dar{{ end }}</div></div>
+          <div class="stat"><div class="n">{{ .Streak }}</div><div class="l">streak</div></div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <button class="btn btn-primary" id="shareBtn" data-share-url="{{ .ShareURL }}">Share result</button>
+        <a class="btn btn-ghost" href="/me" style="text-align:center;text-decoration:none;display:block;">See your decoys ▸</a>
+      </div>
+
+      <pre id="shareCard" hidden>{{ .ShareCard }}</pre>
+
+      {{ if .NextPromptID }}
+      <div class="decoy">
+        <h3>Become tomorrow's decoy 🪶</h3>
+        <p>Tomorrow's prompt: <span class="nextprompt">&ldquo;{{ .NextPromptText }}&rdquo;</span><br>
+          Write a <b>human</b> answer. The best ones get planted alongside the bot — your words help fool the next player.</p>
+        <form id="decoyForm" data-prompt-id="{{ .NextPromptID }}">
+          <textarea id="decoyText" maxlength="220" placeholder="type like a person, not a press release…" required minlength="4"></textarea>
+          <button type="submit" class="btn btn-primary" id="decoySubmit">Submit my answer</button>
+          <div class="decoy-meta">
+            <small id="decoyHint">decoys go through a quick review before they go live</small>
+          </div>
+        </form>
+      </div>
+      {{ end }}
+    </div>
+  </div>
+  <script id="bbg-state" type="application/json">{{ .State }}</script>
+{{ end }}
+
+{{ define "scripts" }}
+  <script src="/static/js/share.js" defer></script>
+  <script src="/static/js/result.js" defer></script>
+{{ end }}

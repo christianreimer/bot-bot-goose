@@ -1,0 +1,68 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-bbg}
+      # No default value: docker compose refuses to start until this is set,
+      # so a forgotten compose.env can never silently boot a postgres with a
+      # well-known password. See deploy/compose.env.example for a generator.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required — generate one with `openssl rand -hex 24`}
+      POSTGRES_DB: ${POSTGRES_DB:-bbg}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bbg}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  bbg:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      BBG_LISTEN: ":8080"
+      BBG_DB_URL: "postgres://${POSTGRES_USER:-bbg}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-bbg}?sslmode=disable"
+      BBG_SESSION_KEY: ${BBG_SESSION_KEY:?BBG_SESSION_KEY required — generate 32+ random bytes hex}
+      BBG_BASE_URL: ${BBG_BASE_URL:-https://botbotgoose.app}
+      BBG_VAPID_PUBLIC: ${BBG_VAPID_PUBLIC:-}
+      BBG_VAPID_PRIVATE: ${BBG_VAPID_PRIVATE:-}
+      BBG_ANTHROPIC_API_KEY: ${BBG_ANTHROPIC_API_KEY:-}
+      # BBG_DEV=1 keeps cookies non-Secure so they survive plain HTTP from
+      # ngrok or curl smoke tests. Leave unset in production behind Caddy.
+      BBG_DEV: ${BBG_DEV:-}
+      TZ: UTC
+    expose:
+      - "8080"
+    # Loopback-only port mapping so tools like ngrok can hit the Go app
+    # directly without going through Caddy's HTTP→HTTPS redirect. Safe
+    # because it's bound to 127.0.0.1, not 0.0.0.0.
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - bbg
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    environment:
+      BBG_DOMAIN: ${BBG_DOMAIN:-localhost}
+
+volumes:
+  pgdata:
+  caddydata:
+  caddyconfig:

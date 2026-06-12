@@ -1,0 +1,26 @@
+{$BBG_DOMAIN} {
+	encode zstd gzip
+
+	# health endpoints — no caching, no logging noise
+	@health path /healthz /readyz /metrics
+	handle @health {
+		reverse_proxy bbg:8080
+	}
+
+	# static — long cache, but the player-facing app shell is server-rendered
+	@static path /static/*
+	handle @static {
+		header Cache-Control "public, max-age=604800, immutable"
+		reverse_proxy bbg:8080
+	}
+
+	# everything else — pass through; the Go app sets its own cache headers
+	reverse_proxy bbg:8080
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "interest-cohort=()"
+	}
+}

@@ -1,0 +1,47 @@
+# Build artifacts (`make build` writes here)
+/bin/
+
+# Local DB dumps
+/backups/
+
+# Local-only env files. compose.env carries BBG_SESSION_KEY + POSTGRES_PASSWORD;
+# never commit it. compose.env.example IS committed (template only).
+/deploy/compose.env
+/deploy/secrets/
+*.env
+.env
+.env.local
+.env.*.local
+
+# Go test + coverage + profile artifacts
+*.test
+*.out
+coverage.out
+*.prof
+
+# Editor / IDE
+.vscode/
+.idea/
+.cursor/
+*.iml
+*.swp
+*.swo
+
+# OS cruft
+.DS_Store
+._*
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# Any stray cert / key material
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+
+# Scratch
+/tmp/
