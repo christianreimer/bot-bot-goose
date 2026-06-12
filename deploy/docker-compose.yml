@@ -35,6 +35,12 @@ services:
       BBG_VAPID_PUBLIC: ${BBG_VAPID_PUBLIC:-}
       BBG_VAPID_PRIVATE: ${BBG_VAPID_PRIVATE:-}
       BBG_ANTHROPIC_API_KEY: ${BBG_ANTHROPIC_API_KEY:-}
+      # Magic-link email. "log" prints the link to stdout (dev). "resend"
+      # uses Resend's REST API and requires BBG_RESEND_API_KEY + a
+      # verified BBG_EMAIL_FROM domain.
+      BBG_EMAIL_PROVIDER: ${BBG_EMAIL_PROVIDER:-log}
+      BBG_RESEND_API_KEY: ${BBG_RESEND_API_KEY:-}
+      BBG_EMAIL_FROM: ${BBG_EMAIL_FROM:-Bot Bot Goose <noreply@localhost>}
       # BBG_DEV=1 keeps cookies non-Secure so they survive plain HTTP from
       # ngrok or curl smoke tests. Leave unset in production behind Caddy.
       BBG_DEV: ${BBG_DEV:-}

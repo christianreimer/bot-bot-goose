@@ -71,7 +71,9 @@ type PublicPlay struct {
 // completed plays match; an in-progress play won't be found.
 func (d *DB) PlayByShortID(ctx context.Context, short string) (*PublicPlay, error) {
 	row := d.QueryRow(ctx, `
-		SELECT p.id, p.user_id, COALESCE(u.handle, ''),
+		SELECT p.id, p.user_id,
+		       CASE WHEN u.display_anonymous OR u.handle IS NULL OR u.handle = ''
+		            THEN '' ELSE u.handle END,
 		       dp.puzzle_number, dp.mode,
 		       p.score_pct, p.completed_at,
 		       COALESCE(s.current, 0)

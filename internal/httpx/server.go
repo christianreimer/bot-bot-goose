@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/christianreimer/bot-bot-goose/internal/db"
+	"github.com/christianreimer/bot-bot-goose/internal/email"
 	"github.com/christianreimer/bot-bot-goose/internal/ratelimit"
 	"github.com/christianreimer/bot-bot-goose/internal/users"
 	"github.com/go-chi/chi/v5"
@@ -30,6 +31,7 @@ type Config struct {
 	SessionKey   []byte
 	SecureCookie bool
 	DB           *db.DB
+	Email        email.Sender
 	Logger       *slog.Logger
 }
 
@@ -53,6 +55,11 @@ func New(cfg Config) (*Server, error) {
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
+	}
+	if cfg.Email == nil {
+		// Sane default for tests and quick local runs: stdout instead of a
+		// real outbound email. Production wiring lives in cmd/server.
+		cfg.Email = &email.LogSender{Log: cfg.Logger}
 	}
 	assets, err := newAssetIndex(cfg.WebDir)
 	if err != nil {
@@ -147,11 +154,21 @@ func (s *Server) routes() {
 		r.Get("/r/{short}", s.handleResultShare)
 		r.Get("/r/{short}/og.png", s.handleResultShareOG)
 
+		// Magic-link sign-in. The GET is the email-tap path; the POST is
+		// the form that mails the link. Both run behind the session
+		// middleware so we know which device cookie to bind.
+		r.Post("/api/auth/magic/request", s.handleMagicRequest)
+		r.Get("/auth/magic/{token}", s.handleMagicConsume)
+		r.Post("/api/auth/logout", s.handleLogout)
+		r.Post("/api/auth/logout-all", s.handleLogoutAll)
+
 		r.Route("/api", func(r chi.Router) {
 			r.Post("/play/start", s.handleAPIPlayStart)
 			r.Post("/play/round/{n}/hint", s.handleAPIHint)
 			r.Post("/play/round/{n}/guess", s.handleAPIGuess)
 			r.Post("/decoy/submit", s.handleAPIDecoySubmit)
+			r.Patch("/me/handle", s.handlePatchHandle)
+			r.Patch("/me/anonymous", s.handlePatchAnonymous)
 		})
 	})
 

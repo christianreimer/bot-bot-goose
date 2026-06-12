@@ -15,6 +15,56 @@
       <div class="verdict">Your decoys, ranked by how many humans they fool.</div>
     </div>
 
+    <section class="account">
+      {{ if .SignedIn }}
+        <div class="account-row">
+          <div>
+            <div class="account-label">Signed in</div>
+            <div class="account-value">{{ .Email }}</div>
+          </div>
+          <div class="account-handle">
+            <label for="handleInput" class="account-label">Handle</label>
+            <form id="handleForm" class="inline-form">
+              <input id="handleInput" name="handle" type="text" minlength="3" maxlength="20"
+                     pattern="[A-Za-z0-9][A-Za-z0-9_-]{2,19}" value="{{ .Handle }}"
+                     placeholder="pick a handle"
+                     autocomplete="off" spellcheck="false" />
+              <button type="submit" class="btn-tiny">save</button>
+            </form>
+            <small id="handleHint" class="muted">3–20 chars · letters, digits, _ -</small>
+          </div>
+          <div class="account-anon">
+            <label class="account-label">Display on leaderboards</label>
+            <label class="toggle">
+              <input id="anonToggle" type="checkbox" {{ if not .DisplayAnonymous }}checked{{ end }} />
+              <span>{{ if .DisplayAnonymous }}anonymous{{ else }}as my handle{{ end }}</span>
+            </label>
+          </div>
+          <div class="account-logout">
+            <button type="button" id="logoutBtn" class="btn-link">Sign out of this device</button>
+            <span class="muted"> · </span>
+            <button type="button" id="logoutAllBtn" class="btn-link danger">Sign out everywhere</button>
+          </div>
+        </div>
+      {{ else }}
+        <div class="account-row signin">
+          <div>
+            <div class="account-label">Sign in</div>
+            <p class="muted" style="margin:4px 0 8px;">
+              Save your streak across devices, claim a handle on the leaderboard, and own your decoys.
+              No password — we email you a one-tap sign-in link.
+            </p>
+          </div>
+          <form id="magicForm" class="inline-form">
+            <input id="magicEmail" name="email" type="email" required placeholder="you@example.com"
+                   autocomplete="email" spellcheck="false" />
+            <button type="submit" class="btn-tiny">email me a link</button>
+          </form>
+          <small id="magicHint" class="muted">we'll only use this to sign you in — no marketing, ever</small>
+        </div>
+      {{ end }}
+    </section>
+
     {{ with .Payoff }}
       {{ if .Visible }}
         <div class="payoff">

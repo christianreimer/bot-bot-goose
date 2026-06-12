@@ -155,3 +155,34 @@ func setCookie(w http.ResponseWriter, value string, secureCookie bool) {
 		MaxAge:   int(CookieMaxAge / time.Second),
 	})
 }
+
+// ClearCookie writes a Set-Cookie header that expires the device cookie
+// immediately. Used by the logout handlers. The browser drops the cookie;
+// the next request will mint a fresh anonymous identity through the
+// session middleware.
+func ClearCookie(w http.ResponseWriter, secureCookie bool) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     CookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secureCookie,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1, // tells the browser to delete the cookie now
+	})
+}
+
+// CurrentDeviceCookieHash returns the SHA-256 of the cleartext cookie value
+// the request is carrying, or nil if there's no valid cookie. Used by the
+// logout handler to identify which device_cookies row to delete.
+func CurrentDeviceCookieHash(r *http.Request, secret []byte) []byte {
+	raw, ok := readCookie(r)
+	if !ok {
+		return nil
+	}
+	cleartext, ok := unwrapCookie(secret, raw)
+	if !ok {
+		return nil
+	}
+	return hashCookie(cleartext)
+}

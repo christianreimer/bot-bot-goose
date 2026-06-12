@@ -29,6 +29,13 @@
 
       <pre id="shareCard" hidden>{{ .ShareCard }}</pre>
 
+      {{ if not .SignedIn }}
+        <div class="signin-cta">
+          <b>Sign in</b> to keep your streak across devices and claim a handle on the leaderboard.
+          <a href="/me">Take 10 seconds ▸</a>
+        </div>
+      {{ end }}
+
       {{ if .NextPromptID }}
         {{ if .ExistingDecoyShareURL }}
         <div class="decoy">

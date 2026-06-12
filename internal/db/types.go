@@ -28,12 +28,27 @@ const (
 )
 
 type User struct {
-	ID         uuid.UUID
-	Handle     *string
-	Email      *string
-	Role       string
-	SpotterELO float64
-	CreatedAt  time.Time
+	ID               uuid.UUID
+	Handle           *string
+	Email            *string
+	Role             string
+	SpotterELO       float64
+	DisplayAnonymous bool
+	CreatedAt        time.Time
+}
+
+// PublicHandle returns the string the leaderboard / share pages should
+// show. Empty handle or DisplayAnonymous=true → "anonymous". This is the
+// single source of truth for the privacy toggle so we don't drift across
+// surfaces.
+func (u *User) PublicHandle() string {
+	if u == nil || u.DisplayAnonymous {
+		return "anonymous"
+	}
+	if u.Handle == nil || *u.Handle == "" {
+		return "anonymous"
+	}
+	return *u.Handle
 }
 
 type DailyPuzzle struct {

@@ -31,7 +31,7 @@ func (d *DB) InsertDeviceCookie(ctx context.Context, userID uuid.UUID, cookieHas
 // ErrNotFound if no row matches.
 func (d *DB) UserByCookieHash(ctx context.Context, cookieHash []byte) (*User, error) {
 	const q = `
-		SELECT u.id, u.handle, u.email, u.role, u.spotter_elo, u.created_at
+		SELECT u.id, u.handle, u.email, u.role, u.spotter_elo, u.display_anonymous, u.created_at
 		  FROM device_cookies dc
 		  JOIN users u ON u.id = dc.user_id
 		 WHERE dc.cookie_hash = $1 AND u.deleted_at IS NULL
@@ -39,13 +39,29 @@ func (d *DB) UserByCookieHash(ctx context.Context, cookieHash []byte) (*User, er
 	`
 	row := d.QueryRow(ctx, q, cookieHash)
 	u := &User{}
-	if err := row.Scan(&u.ID, &u.Handle, &u.Email, &u.Role, &u.SpotterELO, &u.CreatedAt); err != nil {
+	if err := row.Scan(&u.ID, &u.Handle, &u.Email, &u.Role, &u.SpotterELO, &u.DisplayAnonymous, &u.CreatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, err
 	}
 	return u, nil
+}
+
+// DeleteDeviceCookie removes the single device_cookies row matching the
+// given hashed cookie. Used by the "sign out of this device" handler.
+// Idempotent: deleting a non-existent row is a no-op (RowsAffected=0).
+func (d *DB) DeleteDeviceCookie(ctx context.Context, cookieHash []byte) error {
+	_, err := d.Exec(ctx, `DELETE FROM device_cookies WHERE cookie_hash = $1`, cookieHash)
+	return err
+}
+
+// DeleteAllDeviceCookiesForUser removes every device_cookies row for the
+// user, signing them out of all devices simultaneously. The user row,
+// streaks, decoys, etc. are untouched.
+func (d *DB) DeleteAllDeviceCookiesForUser(ctx context.Context, userID uuid.UUID) error {
+	_, err := d.Exec(ctx, `DELETE FROM device_cookies WHERE user_id = $1`, userID)
+	return err
 }
 
 // SetUserRole updates role and writes an audit_log entry. Used by admin tooling.

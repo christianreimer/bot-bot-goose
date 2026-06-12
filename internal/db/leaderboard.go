@@ -83,7 +83,8 @@ type ForgerLeaderboardRow struct {
 func (d *DB) TopForgers(ctx context.Context, n int, gate int64) ([]ForgerLeaderboardRow, error) {
 	rows, err := d.Query(ctx, `
 		SELECT u.id,
-		       COALESCE(u.handle, 'anonymous'),
+		       CASE WHEN u.display_anonymous OR u.handle IS NULL OR u.handle = ''
+		            THEN 'anonymous' ELSE u.handle END,
 		       fr.adjusted_fool_rate,
 		       fr.tier,
 		       fr.total_impressions,
@@ -136,13 +137,14 @@ type SpotterLeaderboardRow struct {
 func (d *DB) TopSpotters(ctx context.Context, n int, minPlays int) ([]SpotterLeaderboardRow, error) {
 	rows, err := d.Query(ctx, `
 		SELECT u.id,
-		       COALESCE(u.handle, 'anonymous'),
+		       CASE WHEN u.display_anonymous OR u.handle IS NULL OR u.handle = ''
+		            THEN 'anonymous' ELSE u.handle END,
 		       AVG(p.score_pct)::float8 AS avg_score,
 		       count(*) AS plays
 		  FROM plays p
 		  JOIN users u ON u.id = p.user_id
 		 WHERE p.completed_at IS NOT NULL AND p.score_pct IS NOT NULL AND u.deleted_at IS NULL
-		 GROUP BY u.id, u.handle
+		 GROUP BY u.id, u.handle, u.display_anonymous
 		 HAVING count(*) >= $2
 		 ORDER BY avg_score DESC, plays DESC
 		 LIMIT $1
@@ -235,14 +237,15 @@ func (d *DB) DecoyByShortID(ctx context.Context, short string) (*PublicDecoy, er
 		       COALESCE(SUM(s.impressions)   FILTER (WHERE s.mode = 'find_the_human'), 0),
 		       COALESCE(SUM(s.picked_as_bot) FILTER (WHERE s.mode = 'find_the_human'), 0),
 		       ds.user_id,
-		       COALESCE(u.handle, '')
+		       CASE WHEN u.display_anonymous OR u.handle IS NULL OR u.handle = ''
+		            THEN '' ELSE u.handle END
 		  FROM decoy_submissions ds
 		  JOIN prompts p ON p.id = ds.prompt_id
 		  LEFT JOIN users u ON u.id = ds.user_id
 		  LEFT JOIN decoy_daily_stats s ON s.decoy_id = ds.id
 		 WHERE replace(ds.id::text, '-', '') LIKE $1 || '%'
 		   AND ds.deleted_at IS NULL
-		 GROUP BY ds.id, ds.text, p.text, ds.status, ds.user_id, u.handle
+		 GROUP BY ds.id, ds.text, p.text, ds.status, ds.user_id, u.handle, u.display_anonymous
 		 LIMIT 1
 	`
 	row := d.QueryRow(ctx, q, short)
@@ -273,7 +276,8 @@ func (d *DB) ForgerRankingFor(ctx context.Context, userID uuid.UUID, gate int64)
 		           ELSE 0 END AS rk
 		      FROM forger_rankings
 		)
-		SELECT COALESCE(u.handle, 'anonymous'),
+		SELECT CASE WHEN u.display_anonymous OR u.handle IS NULL OR u.handle = ''
+		            THEN 'anonymous' ELSE u.handle END,
 		       ranked.adjusted_fool_rate, ranked.tier,
 		       ranked.total_impressions, ranked.total_picked_as_bot, ranked.rk
 		  FROM ranked

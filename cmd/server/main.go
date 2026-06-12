@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"github.com/christianreimer/bot-bot-goose/internal/db"
+	"github.com/christianreimer/bot-bot-goose/internal/email"
 	"github.com/christianreimer/bot-bot-goose/internal/httpx"
 )
 
@@ -53,6 +54,27 @@ func main() {
 	}
 	defer pool.Close()
 
+	// Email sender. BBG_EMAIL_PROVIDER controls which one runs; "log" is
+	// the safe dev default that prints magic links to stdout. Production
+	// flips to "resend" and requires BBG_RESEND_API_KEY + BBG_EMAIL_FROM.
+	var sender email.Sender
+	switch os.Getenv("BBG_EMAIL_PROVIDER") {
+	case "resend":
+		sender = &email.ResendSender{
+			APIKey: os.Getenv("BBG_RESEND_API_KEY"),
+			From:   os.Getenv("BBG_EMAIL_FROM"),
+		}
+	default:
+		sender = &email.LogSender{Log: log}
+		if !dev {
+			log.Warn("BBG_EMAIL_PROVIDER not set — magic links will be logged, not sent")
+		}
+	}
+	if err := email.AssertConfigured(sender); err != nil {
+		log.Error("email sender misconfigured", "err", err)
+		os.Exit(1)
+	}
+
 	srv, err := httpx.New(httpx.Config{
 		Listen:       listen,
 		BaseURL:      baseURL,
@@ -60,6 +82,7 @@ func main() {
 		SessionKey:   sessionKey,
 		SecureCookie: !dev, // local http needs Secure=false
 		DB:           pool,
+		Email:        sender,
 		Logger:       log,
 	})
 	if err != nil {

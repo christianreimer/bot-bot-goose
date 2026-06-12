@@ -70,12 +70,29 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		views = append(views, decoyViewWithShare(d, payoff, baseURL, shareURL))
 	}
 
+	signedIn := u.Email != nil && *u.Email != ""
+	var emailDisplay string
+	if signedIn {
+		emailDisplay = *u.Email
+	}
+	handleDisplay := ""
+	if u.Handle != nil {
+		handleDisplay = *u.Handle
+	}
+
 	s.renderHTML(w, http.StatusOK, "pages/me.html", map[string]any{
-		"PuzzleNumber": int32(0), // header padding cosmetic
-		"Streak":       streak,
-		"Decoys":       views,
-		"Payoff":       payoff,
-		"BaseURL":      baseURL,
+		"PuzzleNumber":     int32(0), // header padding cosmetic
+		"Streak":           streak,
+		"Decoys":           views,
+		"Payoff":           payoff,
+		"BaseURL":          baseURL,
+		"SignedIn":         signedIn,
+		"Email":            emailDisplay,
+		"Handle":           handleDisplay,
+		"DisplayAnonymous": u.DisplayAnonymous,
+		// `?signed_in=1` after a successful magic-link consume — let the
+		// page show a one-time toast.
+		"JustSignedIn": r.URL.Query().Get("signed_in") == "1",
 	})
 }
 

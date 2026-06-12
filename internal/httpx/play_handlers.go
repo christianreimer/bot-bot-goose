@@ -148,6 +148,10 @@ func (s *Server) renderPlayPage(w http.ResponseWriter, r *http.Request, puzzle *
 			}
 		}
 
+		// Anonymous users see a soft sign-in CTA on the result page —
+		// design §12 picks streak + leaderboard as the gating prompts.
+		signedIn := u != nil && u.Email != nil && *u.Email != ""
+
 		s.renderHTML(w, http.StatusOK, "pages/result.html", map[string]any{
 			"PuzzleNumber":          puzzle.PuzzleNumber,
 			"Mode":                  string(puzzle.Mode),
@@ -163,6 +167,7 @@ func (s *Server) renderPlayPage(w http.ResponseWriter, r *http.Request, puzzle *
 			"NextPromptText":        nextPromptText,
 			"ExistingDecoyShareURL": existingDecoyShareURL,
 			"ExistingDecoyStatus":   existingDecoyStatus,
+			"SignedIn":              signedIn,
 		})
 		return
 	}
