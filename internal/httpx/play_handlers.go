@@ -129,24 +129,40 @@ func (s *Server) renderPlayPage(w http.ResponseWriter, r *http.Request, puzzle *
 		// Soft-fail if none is available — the page still renders without
 		// the contribution form.
 		var nextPromptID, nextPromptText string
+		var pidUUID uuid.UUID
 		if pid, ptext, err := s.cfg.DB.NextSolicitPrompt(r.Context(), puzzle.PuzzleNumber); err == nil {
 			nextPromptID = pid.String()
 			nextPromptText = ptext
+			pidUUID = pid
+		}
+
+		// If the user has already planted a decoy for this prompt, hide the
+		// form and surface a link back to /me. Design doc §4: one scored
+		// decoy per prompt per user — show that state instead of letting
+		// them submit and hit a 409.
+		var existingDecoyShareURL, existingDecoyStatus string
+		if u != nil && pidUUID != uuid.Nil {
+			if ex, err := s.cfg.DB.DecoyForUserAndPrompt(r.Context(), u.ID, pidUUID); err == nil {
+				existingDecoyShareURL = "/d/" + share.DecoyShortID(ex.ID)
+				existingDecoyStatus = ex.Status
+			}
 		}
 
 		s.renderHTML(w, http.StatusOK, "pages/result.html", map[string]any{
-			"PuzzleNumber":   puzzle.PuzzleNumber,
-			"Mode":           string(puzzle.Mode),
-			"Outcomes":       outcomes,
-			"Grid":           share.Grid(outcomes),
-			"ScorePct":       game.ScorePct(outcomes),
-			"Streak":         state.Streak,
-			"ShareCard":      card,
-			"ShareURL":       shareURL,
-			"BaseURL":        baseURL,
-			"State":          embedded,
-			"NextPromptID":   nextPromptID,
-			"NextPromptText": nextPromptText,
+			"PuzzleNumber":          puzzle.PuzzleNumber,
+			"Mode":                  string(puzzle.Mode),
+			"Outcomes":              outcomes,
+			"Grid":                  share.Grid(outcomes),
+			"ScorePct":              game.ScorePct(outcomes),
+			"Streak":                state.Streak,
+			"ShareCard":             card,
+			"ShareURL":              shareURL,
+			"BaseURL":               baseURL,
+			"State":                 embedded,
+			"NextPromptID":          nextPromptID,
+			"NextPromptText":        nextPromptText,
+			"ExistingDecoyShareURL": existingDecoyShareURL,
+			"ExistingDecoyStatus":   existingDecoyStatus,
 		})
 		return
 	}
@@ -619,11 +635,38 @@ func bytesEqual(a, b []byte) bool {
 // ---------------------------------------------------------------------------
 // Decoy submission (Phase 2 — see plan §7 build order step 7)
 // ---------------------------------------------------------------------------
+//
+// Two layers of defense beyond the schema's unique constraint:
+//
+//  1. Per-device + per-IP rate limit. Device cookies can be rotated, so the
+//     IP bucket catches scripted attempts behind a single egress; the device
+//     bucket catches a single client retrying in a tight loop.
+//  2. An explicit existence check before the insert so legitimate users get
+//     a friendly "already_submitted" response with their existing decoy's
+//     status, not a generic 409 from a unique-violation error.
+//
+// Per design doc §4: "one scored decoy per prompt per user — no
+// brute-forcing." The rule lives in the schema; this handler just makes
+// the user-facing behavior clear.
 
 type decoySubmitReq struct {
 	PromptID string `json:"prompt_id"`
 	Text     string `json:"text"`
 }
+
+const (
+	// Per-device: 5 submissions per hour, refilled at 5/hr. A normal user
+	// will submit at most once per puzzle (and there's one puzzle per day),
+	// so this is generous enough to never bite them but tight enough to
+	// catch a scripted client.
+	decoySubmitDeviceCapacity = 5
+	decoySubmitDeviceRefill   = 5.0 // per hour
+
+	// Per-IP: looser. Shared networks (offices, coffee shops, IPv4 NAT)
+	// must not lock everyone out because one user is enthusiastic.
+	decoySubmitIPCapacity = 20
+	decoySubmitIPRefill   = 20.0 // per hour
+)
 
 func (s *Server) handleAPIDecoySubmit(w http.ResponseWriter, r *http.Request) {
 	var body decoySubmitReq
@@ -641,10 +684,89 @@ func (s *Server) handleAPIDecoySubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := users.FromContext(r.Context())
-	id, err := s.cfg.DB.SubmitDecoy(r.Context(), u.ID, promptID, body.Text)
+	ctx := r.Context()
+
+	// 1. Rate limit. Check device first (cheaper to hit, narrower target);
+	//    then IP. Both must allow.
+	if !s.allowDecoySubmit(ctx, w, "decoy_submit:device:"+u.ID.String(), decoySubmitDeviceCapacity, decoySubmitDeviceRefill) {
+		return
+	}
+	if !s.allowDecoySubmit(ctx, w, "decoy_submit:ip:"+clientIP(r), decoySubmitIPCapacity, decoySubmitIPRefill) {
+		return
+	}
+
+	// 2. Existence check. If they already have a non-deleted decoy for this
+	//    prompt, tell them — and include the existing row's status + short id
+	//    so the client can link back to /me or /d/<short>.
+	if existing, err := s.cfg.DB.DecoyForUserAndPrompt(ctx, u.ID, promptID); err == nil {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"code": "already_submitted",
+			"existing": map[string]string{
+				"text":      existing.Text,
+				"status":    existing.Status,
+				"share_url": "/d/" + share.DecoyShortID(existing.ID),
+			},
+		})
+		return
+	} else if !db.IsNotFound(err) {
+		writeJSONErr(w, http.StatusInternalServerError, "db", err.Error())
+		return
+	}
+
+	// 3. Insert. The unique constraint is the last line of defense — if a
+	//    racing concurrent submission squeezed in between our check and now,
+	//    we still surface a clean error.
+	id, err := s.cfg.DB.SubmitDecoy(ctx, u.ID, promptID, body.Text)
 	if err != nil {
+		// Re-check in case of a TOCTOU race so we still return the
+		// already_submitted code rather than a raw DB error.
+		if existing, e2 := s.cfg.DB.DecoyForUserAndPrompt(ctx, u.ID, promptID); e2 == nil {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"code": "already_submitted",
+				"existing": map[string]string{
+					"text":      existing.Text,
+					"status":    existing.Status,
+					"share_url": "/d/" + share.DecoyShortID(existing.ID),
+				},
+			})
+			return
+		}
 		writeJSONErr(w, http.StatusConflict, "submit_failed", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": id})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":        id,
+		"share_url": "/d/" + share.DecoyShortID(id),
+	})
+}
+
+func (s *Server) allowDecoySubmit(ctx context.Context, w http.ResponseWriter, key string, capacity int, refillPerHour float64) bool {
+	ok, retry, err := s.limiter.Allow(ctx, key, capacity, refillPerHour)
+	if err != nil {
+		s.cfg.Logger.Warn("ratelimit allow failed", "key", key, "err", err)
+		return true // fail-open: never block submissions due to limiter problems
+	}
+	if !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())))
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{
+			"code":            "rate_limited",
+			"retry_after_sec": int(retry.Seconds()),
+		})
+		return false
+	}
+	return true
+}
+
+// clientIP extracts the request's IP, honoring proxy headers. chi's
+// middleware.RealIP already sets r.RemoteAddr to the X-Forwarded-For
+// origin behind a trusted proxy, so this is just a clean-up of the
+// port suffix.
+func clientIP(r *http.Request) string {
+	addr := r.RemoteAddr
+	for i := len(addr) - 1; i >= 0; i-- {
+		if addr[i] == ':' {
+			return addr[:i]
+		}
+	}
+	return addr
 }

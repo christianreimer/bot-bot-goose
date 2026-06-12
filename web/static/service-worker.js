@@ -7,16 +7,17 @@
 // Bump on any change to the cached set. The browser only swaps SWs after the
 // old one's clients unload — bumping here is what unsticks a hot-fix for
 // users who already installed.
-const CACHE = 'bbg-shell-v2';
+const CACHE = 'bbg-shell-v3';
 
 // IMPORTANT: never cache "/" or any /play/* page. Those carry server-rendered
 // state (current round, play token, mode). Caching them would freeze a stale
 // view and defeat the anti-cheat story.
+//
+// Static CSS/JS aren't pre-cached anymore: the server emits content-hashed
+// URLs ("/static/css/app.css?v=<hash>"), so a content change produces a new
+// URL that misses cache and falls through to fetch automatically. The fetch
+// handler below still caches the hashed URL on first hit.
 const SHELL = [
-  '/static/css/app.css',
-  '/static/js/play.js',
-  '/static/js/share.js',
-  '/static/js/result.js',
   '/manifest.json',
 ];
 

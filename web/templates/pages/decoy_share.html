@@ -10,13 +10,13 @@
 {{ end }}
 
 {{ define "header-meta" }}
-  <a href="/" class="puzzle-no">▸ play today</a>
+  <a href="/" class="nav-link">▸ play today</a>
 {{ end }}
 
 {{ define "content" }}
   <div class="stage">
     <div class="me-header">
-      <div class="big-goose">🪶</div>
+      <div class="page-mark">🪶</div>
       <h2>Decoy report</h2>
       <div class="verdict">A human wrote this. Could you have caught it?</div>
     </div>
@@ -24,7 +24,7 @@
     <div class="decoy-report">
       <div class="decoy-prompt">{{ .PromptText }}</div>
       <div class="decoy-quote">&ldquo;{{ .DecoyText }}&rdquo;</div>
-      <div class="decoy-byline">— <b>{{ .Author }}</b></div>
+      <div class="decoy-byline">by <b>{{ .Author }}</b></div>
 
       {{ if eq .Status "pending" }}
         <div class="payoff-headline" style="margin-top:14px;">
@@ -71,6 +71,6 @@
 {{ end }}
 
 {{ define "scripts" }}
-  <script src="/static/js/share.js" defer></script>
-  <script src="/static/js/decoy_share.js" defer></script>
+  <script src="{{ asset "/static/js/share.js" }}" defer></script>
+  <script src="{{ asset "/static/js/decoy_share.js" }}" defer></script>
 {{ end }}

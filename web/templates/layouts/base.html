@@ -6,8 +6,8 @@
 <title>{{ block "title" . }}Bot Bot Goose{{ end }}</title>
 <meta name="description" content="A daily game where you spot the AI hiding among real humans." />
 <link rel="manifest" href="/manifest.json" />
-<link rel="icon" href="/static/icons/goose.svg" type="image/svg+xml" />
-<link rel="stylesheet" href="/static/css/app.css" />
+<link rel="icon" href="{{ asset "/static/icons/goose.svg" }}" type="image/svg+xml" />
+<link rel="stylesheet" href="{{ asset "/static/css/app.css" }}" />
 {{ block "head" . }}{{ end }}
 <meta property="og:type" content="website" />
 {{ block "og" . }}

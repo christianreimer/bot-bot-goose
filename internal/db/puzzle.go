@@ -146,6 +146,35 @@ func (d *DB) NextPuzzleNumber(ctx context.Context) (int32, error) {
 	return *n + 1, nil
 }
 
+// ExistingDecoy is the data the result page needs to tell a user "you've
+// already planted a decoy for this prompt" instead of showing the form.
+type ExistingDecoy struct {
+	ID     uuid.UUID
+	Text   string
+	Status string
+}
+
+// DecoyForUserAndPrompt returns the user's existing non-deleted decoy for
+// the given prompt, if any. ErrNotFound means they haven't submitted yet
+// and the form should render normally.
+func (d *DB) DecoyForUserAndPrompt(ctx context.Context, userID, promptID uuid.UUID) (*ExistingDecoy, error) {
+	const q = `
+		SELECT id, text, status
+		  FROM decoy_submissions
+		 WHERE user_id = $1 AND prompt_id = $2 AND deleted_at IS NULL
+		 LIMIT 1
+	`
+	row := d.QueryRow(ctx, q, userID, promptID)
+	out := &ExistingDecoy{}
+	if err := row.Scan(&out.ID, &out.Text, &out.Status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return out, nil
+}
+
 // NextSolicitPrompt picks the prompt to ask a player to write a decoy for,
 // given they just finished puzzle `currentNumber`. Preference order:
 //

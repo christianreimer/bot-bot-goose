@@ -1,9 +1,9 @@
 {{ template "base.html" . }}
 
-{{ define "title" }}Bot Bot Goose — #{{ pad3 .PuzzleNumber }} result{{ end }}
+{{ define "title" }}Bot Bot Goose · #{{ pad3 .PuzzleNumber }} result{{ end }}
 
 {{ define "og" }}
-  <meta property="og:title" content="{{ .Author }} {{ .TitleVerb }} — {{ .StatLabel }} {{ .ScorePct }}%" />
+  <meta property="og:title" content="{{ .Author }} {{ .TitleVerb }} · {{ .StatLabel }} {{ .ScorePct }}%" />
   <meta property="og:description" content="Bot Bot Goose #{{ pad3 .PuzzleNumber }} · spot the AI hiding among real humans." />
   <meta property="og:url" content="{{ .ShareURL }}" />
   <meta property="og:image" content="{{ .OGImageURL }}" />
@@ -15,7 +15,7 @@
 {{ end }}
 
 {{ define "header-meta" }}
-  <a href="/" class="puzzle-no">▸ play today</a>
+  <a href="/" class="nav-link">▸ play today</a>
 {{ end }}
 
 {{ define "content" }}

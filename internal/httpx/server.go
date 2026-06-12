@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/christianreimer/bot-bot-goose/internal/db"
+	"github.com/christianreimer/bot-bot-goose/internal/ratelimit"
 	"github.com/christianreimer/bot-bot-goose/internal/users"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -42,6 +43,8 @@ type Server struct {
 	cfg       Config
 	router    chi.Router
 	templates map[string]*template.Template
+	assets    *assetIndex
+	limiter   *ratelimit.Limiter
 }
 
 func New(cfg Config) (*Server, error) {
@@ -51,11 +54,20 @@ func New(cfg Config) (*Server, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
-	tpl, err := loadTemplates(cfg.WebDir)
+	assets, err := newAssetIndex(cfg.WebDir)
+	if err != nil {
+		return nil, fmt.Errorf("index static assets: %w", err)
+	}
+	tpl, err := loadTemplates(cfg.WebDir, assets)
 	if err != nil {
 		return nil, fmt.Errorf("load templates: %w", err)
 	}
-	s := &Server{cfg: cfg, templates: tpl}
+	s := &Server{
+		cfg:       cfg,
+		templates: tpl,
+		assets:    assets,
+		limiter:   ratelimit.New(cfg.DB.Pool),
+	}
 	s.routes()
 	return s, nil
 }
@@ -101,12 +113,14 @@ func (s *Server) routes() {
 	r.Get("/readyz", s.handleReadyz)
 	r.Get("/robots.txt", s.handleRobots)
 
-	// Static — fingerprinted in prod via Caddy headers, but the server still
-	// serves the files behind it.
+	// Static — content-hashed URLs (?v=<hash>) come from the `asset` template
+	// helper, so we can set far-future Cache-Control here without risking a
+	// stale CSS/JS surviving a deploy. The manifest and service worker live
+	// at the root (unversioned) and stay short-cache so PWA updates roll.
 	fileServer := http.StripPrefix("/static/", http.FileServer(http.Dir(filepath.Join(s.cfg.WebDir, "static"))))
-	r.Handle("/static/*", fileServer)
+	r.Handle("/static/*", cacheImmutable(fileServer))
 	r.Handle("/manifest.json", http.FileServer(http.Dir(filepath.Join(s.cfg.WebDir, "static"))))
-	r.Handle("/service-worker.js", http.FileServer(http.Dir(filepath.Join(s.cfg.WebDir, "static"))))
+	r.Handle("/service-worker.js", noStore(http.FileServer(http.Dir(filepath.Join(s.cfg.WebDir, "static")))))
 
 	// Player routes — all behind device-cookie session middleware.
 	r.Group(func(r chi.Router) {
@@ -159,14 +173,34 @@ func (s *Server) handleRobots(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("User-agent: *\nDisallow: /play/\nDisallow: /api/\n"))
 }
 
+// cacheImmutable sets a year-long Cache-Control on responses. Safe only for
+// routes whose URLs change when content changes (we content-hash /static/*
+// via the `asset` template helper).
+func cacheImmutable(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		h.ServeHTTP(w, r)
+	})
+}
+
+// noStore tells the browser to revalidate every time. Used for the service
+// worker so a bug-fix doesn't get pinned by an intermediate cache.
+func noStore(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		h.ServeHTTP(w, r)
+	})
+}
+
 // loadTemplates reads layouts/ as the shared base and produces one template
 // set per file under pages/. Each page is a clone of the layout chain plus
 // the page's own defines, so a `{{ define "content" }}` in pages/play.html
 // only affects play renders — not result.html or no_puzzle.html.
-func loadTemplates(webDir string) (map[string]*template.Template, error) {
+func loadTemplates(webDir string, assets *assetIndex) (map[string]*template.Template, error) {
 	root := filepath.Join(webDir, "templates")
 	funcs := template.FuncMap{
-		"pad3": func(n int32) string { return fmt.Sprintf("%03d", n) },
+		"pad3":  func(n int32) string { return fmt.Sprintf("%03d", n) },
+		"asset": assets.url,
 	}
 
 	// 1. Parse every layout/partial file into a shared base template.

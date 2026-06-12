@@ -32,7 +32,11 @@
   const stage = document.getElementById('stage');
   const progressEl = document.getElementById('progress');
   const streakNumEl = document.getElementById('streakNum');
-  if (streakNumEl) streakNumEl.textContent = state.streak;
+  if (streakNumEl) {
+    streakNumEl.textContent = state.streak;
+    const streakEl = streakNumEl.closest('.streak');
+    if (streakEl) streakEl.hidden = !state.streak;
+  }
 
   render();
 
@@ -45,11 +49,22 @@
 
   function renderProgress() {
     progressEl.innerHTML = '';
+    progressEl.setAttribute('role', 'list');
+    progressEl.setAttribute('aria-label', 'Round progress');
     for (let i = 0; i < N_ROUNDS; i++) {
       const f = document.createElement('div');
       f.className = 'feather';
-      if (state.outcomes[i]) f.classList.add(state.outcomes[i]);
-      if (i === state.round.index && !state.locked) f.classList.add('active');
+      f.setAttribute('role', 'listitem');
+      const outcome = state.outcomes[i];
+      const isActive = i === state.round.index && !state.locked;
+      if (outcome) f.classList.add(outcome);
+      if (isActive) f.classList.add('active');
+      const statusWord = outcome === 'green' ? 'correct'
+        : outcome === 'yellow' ? 'after a hint'
+        : outcome === 'red' ? 'wrong'
+        : isActive ? 'in progress'
+        : 'locked';
+      f.setAttribute('aria-label', `Round ${i + 1} of ${N_ROUNDS}: ${statusWord}`);
       progressEl.appendChild(f);
     }
   }
@@ -82,7 +97,7 @@
     const hint = document.createElement('button');
     hint.className = 'btn btn-ghost';
     hint.textContent = r.hint_used
-      ? 'Hint used — one decoy removed'
+      ? 'Hint used. One decoy removed.'
       : `🔉 Honk for a hint (removes one ${isHunt === 'human' ? 'bot' : 'human'})`;
     hint.disabled = !!r.hint_used || state.locked;
     hint.onclick = useHint;

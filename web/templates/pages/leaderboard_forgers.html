@@ -3,14 +3,14 @@
 {{ define "title" }}Forger leaderboard{{ end }}
 
 {{ define "header-meta" }}
-  <a href="/" class="puzzle-no">← today</a>
-  <a href="/leaderboard/spotters" class="puzzle-no">spotters ▸</a>
+  <a href="/" class="nav-link">← today</a>
+  <a href="/leaderboard/spotters" class="nav-link">spotters ▸</a>
 {{ end }}
 
 {{ define "content" }}
   <div class="stage">
     <div class="me-header">
-      <div class="big-goose">🤖</div>
+      <div class="page-mark">🤖</div>
       <h2>Forger leaderboard</h2>
       <div class="verdict">Best at sounding bot-ish. Ranked on adjusted fool rate.</div>
     </div>
@@ -30,8 +30,8 @@
       </div>
     {{ else }}
       <div class="muted empty">
-        No forgers above {{ .GateMin }} impressions yet. Submit a decoy from any result page —
-        once it accumulates {{ .GateMin }} impressions across players, you'll appear here.
+        No forgers above {{ .GateMin }} impressions yet. Submit a decoy from any result page.
+        Once it accumulates {{ .GateMin }} impressions across players, you'll appear here.
       </div>
     {{ end }}
   </div>
