@@ -46,17 +46,17 @@ func Grid(outcomes []game.Outcome) string {
 	return sb.String()
 }
 
-// Card is the full multi-line share string. Mode-aware copy ("Daily Goose"
-// vs "Daily Human") but identical emoji vocabulary.
+// Card is the full multi-line share string. The "Daily Goose" name is
+// the brand line and stays constant across modes; the mode inversion
+// is signalled by the stat label (Bot-Dar vs Human-Dar) and the icon.
 func Card(puzzleNumber int32, outcomes []game.Outcome, mode game.Mode, streak int, baseURL string) string {
 	pct := game.ScorePct(outcomes)
 	icon := IconFindBot
-	title := "Daily Goose"
+	const title = "Daily Goose"
 	statLabel := "Bot-Dar"
 	target := "Goose"
 	if mode == game.FindTheHuman {
 		icon = IconFindHuman
-		title = "Daily Human"
 		statLabel = "Human-Dar"
 		target = "Human"
 	}

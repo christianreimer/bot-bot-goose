@@ -89,10 +89,9 @@ func RenderResultOG(r ResultOG) ([]byte, error) {
 	// Header — 🪿/🧍 ASCII fallback (no color-emoji font server-side), brand wordmark, puzzle number.
 	brand := "Bot Bot Goose"
 	drawString(img, face24, brand, cardX+36, cardY+58, colorInk)
+	// "Daily Goose" is the brand line and stays constant across modes.
+	// The Mode inversion is carried by the stat label below the grid.
 	subtitle := fmt.Sprintf("Daily Goose #%03d", r.PuzzleNumber)
-	if r.Mode == game.FindTheHuman {
-		subtitle = fmt.Sprintf("Daily Human #%03d", r.PuzzleNumber)
-	}
 	drawString(img, face14, subtitle, cardX+36, cardY+86, colorMuted)
 
 	// The grid — three squares with rounded corners, sized to dominate the card.
