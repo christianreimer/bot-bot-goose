@@ -122,7 +122,7 @@ func RenderResultOG(r ResultOG) ([]byte, error) {
 	}
 
 	// Footer.
-	footer := "botbotgoose.fun · spot the AI hiding among humans"
+	footer := "botbotgoose.fun · spot the AI hiding among real humans"
 	drawStringCentered(img, face18, footer, OGWidth/2, OGHeight-44, colorMuted)
 
 	var buf bytes.Buffer
