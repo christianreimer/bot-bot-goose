@@ -1,10 +1,10 @@
 # Bot Bot Goose
 
-> A daily web game where you hunt the AI hiding among real humans. One bot. Three humans. Tap the goose.
+> A daily web game where you spot the AI hiding among real humans. One bot. Three humans. Tap the goose.
 
 <!-- TODO: drop a 1200x630 screenshot of the result grid here once the UI is polished. -->
 
-Bot Bot Goose (`bbg`) is a server-rendered Go web app for a Wordle-style daily game built around the question *can you still tell a human from an AI?* Every day, three rounds. Each round shows a prompt and four answers — one bot, three humans (or, on inverted days, three bots and one human). You tap the odd one out. After three rounds you get a Bot-Dar score and a Wordle-grid you can share.
+Bot Bot Goose (`bbg`) is a server-rendered Go web app for a Wordle-style daily game built around the question *can you still tell a human from an AI?* Every day, three rounds. Each round shows a prompt and four answers: one bot, three humans. You tap the odd one out. After three rounds you get a Bot-Dar score and a Wordle-grid you can share.
 
 The cultural bet is that this question is genuinely loaded right now, and the result is more of an identity statement than a trivia score — which is what makes the grid shareable.
 
@@ -16,8 +16,8 @@ The cultural bet is that this question is genuinely loaded right now, and the re
 
 - **Server-authoritative daily puzzle** — answer labels never reach the client until a guess is committed. The shared grid stays meaningful because the day's bot can't be data-mined.
 - **Per-play slot permutation + HMAC'd play tokens** — the anti-cheat backbone, with tests in `internal/play/`.
-- **Two game modes**: classic *Find the Bot* (1 bot + 3 humans) and inverted *Find the Human* (3 bots + 1 human). Mode is chosen per puzzle by the composer; same scoring, same share-grid vocabulary.
-- **You vs the Room** (design §4) — players submit human-written decoys that go into the moderation queue and, once approved, get rotated into future puzzles. There's a forger leaderboard, a `/me` payoff page, and a per-decoy share artifact.
+- **You vs the Room** (design §4) — players submit human-written lines that go into the moderation queue and, once approved, get rotated into future puzzles. After each round's reveal, players cast a "felt most human?" vote among the three real lines; contributors rank on the Originals leaderboard by how often the room picks theirs as the most human (see `internal/leaderboard`).
+- **Collective rally stat** — every nightly rollup freezes `Yesterday, humans caught the goose X%` into `daily_collective_stats`. It surfaces on the result page, the share-card text, and the OG image — identical for everyone, stable for the day.
 - **Public share artifacts** at stable URLs:
   - `/r/<short>` — per-play result page with 1200×630 OG image (the grid as a PNG) so link previews unfurl into a card, not a text bubble.
   - `/d/<short>` — per-decoy report ("could you have caught this?") with author attribution.
@@ -62,9 +62,8 @@ Other day-to-day:
 make logs                                                       # tail server + Caddy logs
 make psql                                                       # \i into the running db
 make build-daily DATE=2026-06-13                                # compose a puzzle for a date
-make build-daily MODE=find_the_human                            # force inverted mode
 make bot-gen PROMPT="What's the worst advice you've ever been given?" N=8
-make rollup                                                     # rebuild forger leaderboards
+make rollup                                                     # rebuild Originals leaderboard + freeze yesterday's collective catch rate
 make backup                                                     # pg_dump → ./backups/<ts>.sql.gz
 go run ./cmd/admin import content/sample-2026-06.json           # bulk content import
 ```
@@ -99,22 +98,21 @@ Run the integrity tests:
 go test ./internal/play/... ./internal/game/... ./internal/share/...
 ```
 
-### Two game modes
+### The puzzle
 
-| Mode | Per round | Player taps | Icon |
-|---|---|---|---|
-| `find_the_bot` (default) | 1 bot + 3 human decoys | The bot | 🪿 |
-| `find_the_human` (inverted) | 3 bots (from distinct archetypes) + 1 human decoy | The human | 🧍 |
+Every round shows a prompt and four answers: 1 bot + 3 human decoys. The player taps the bot. The share grid uses 🟩🟨🟥 (green / yellow / red) for catch / hint-assisted catch / miss.
 
-Mode is chosen by the composer per the rotation policy (≈5 find_the_bot per 1 find_the_human). The share grid uses identical 🟩🟨🟥 vocabulary in both modes, so grids stay visually comparable across the inversion. The mode-icon (🪿 vs 🧍) signals the variant on the share card.
+> An earlier build had an inverted "find the human" mode. It was reverted in migration `0008_drop_dual_mode.sql` — added complexity across the schema, scoring, leaderboard, share renderers, intro modal, and admin tooling, with no comparable upside. Every puzzle is now 1 bot + 3 decoys, period.
 
-Scoring is identical across modes; the unified **Adjusted Fool Rate** (`internal/leaderboard/tier.go`) shrinks toward 0.25 for find_the_bot impressions and 0.75 for find_the_human impressions, so a contributor's forger ranking is honest across mixed exposure.
+### What ranks contributors
+
+After each round's reveal the player optionally casts a "felt most human?" vote among the three real decoys (the bot card is not votable). The **Adjusted Most-Human Rate** (`internal/leaderboard.AdjustedMostHumanRate`) shrinks each contributor's raw rate toward the 1/3 chance baseline by `k` impressions — the same shrinkage strength the old fool rate used, just anchored at chance instead of 0.25. That rate is what the Originals leaderboard orders on; the legacy fool rate is still tracked but appears only as display-only flavor on the per-line report card. See migration `0009_realest_vote.sql` for the schema delta.
 
 ### You vs the Room (contribution loop)
 
-Players can submit human-written decoys from the result page. Submissions go to moderation as `pending`. Once approved, the composer's bandit can plant them in future puzzles. Each decoy's impressions and "thought-I-was-a-bot" counts roll up nightly into `forger_rankings`; users see their stats on `/me` and rank on `/leaderboard/originals`.
+Players can submit human-written lines from the result page. Submissions go to moderation as `pending`. Once approved, the composer can drop them into future puzzles. Each line's impressions and realest-track votes roll up nightly into `forger_rankings` (table name kept for stability; the surface is the Originals leaderboard). Users see their stats on `/me` and rank on `/leaderboard/originals`.
 
-Every approved decoy gets a stable shareable URL at `/d/<short>` — a "could you have caught this?" hook with the author's handle, fool rate, and tier. Result pages also share a stable URL at `/r/<short>` whose OG image is the player's grid rendered as a 1200×630 PNG.
+Every approved line gets a stable shareable URL at `/d/<short>` — a "could you have caught this?" hook with the author's handle, most-human rate, tier, and (when non-trivial) the legacy fool-rate flavor line. Result pages share a stable URL at `/r/<short>` whose OG image is the player's grid rendered as a 1200×630 PNG; both the page and the image carry the day's `Humans yesterday: X%` collective line when one is available.
 
 ## Architecture
 
@@ -129,9 +127,10 @@ cmd/
   admin/            seed, promote, vapid-gen, import (JSON content), rollup
 internal/
   play/             slot permutation + HMAC token issue/verify — the load-bearing anti-cheat code
-  game/             pure scoring + unified fool rate + outcome resolution
+  game/             pure scoring + outcome resolution + shrinkage constants
   share/            spoiler-free emoji grid, share card text, OG PNG renderer, short IDs
-  leaderboard/      tier math + nightly rollup of decoy_daily_stats → forger_rankings
+  leaderboard/      adjusted-most-human-rate + tier math + nightly rollup → forger_rankings
+  collective/       nightly freeze of yesterday's catch-rate (daily_collective_stats)
   content/          archetype roster (design §5)
   users/            device-cookie session + CSRF middleware
   db/               pgx-based query layer (one file per domain)
@@ -158,9 +157,9 @@ Tracks the 14-step build order from the implementation plan. See [`BACKLOG.md`](
 - [x] **6. Streaks + PWA hooks** — streaks live, manifest + service worker shipped. *Push subscribe endpoint + email reminders: TODO.*
 - [x] **7. Decoy submission** — `POST /api/decoy/submit`, `/me` payoff page. *Moderation review UI: TODO (approve via `make psql` for now).*
 - [x] **8. Bot-candidate generator** — `cmd/bot-candidates` with Anthropic Messages API.
-- [x] **9. `puzzle-build` cron** — idempotent composer with mode rotation + 22:00 UTC alarm. *Slot E/P/B bandit: uniform-random stub; replace per plan.*
-- [x] **10. Find-the-Human mode** — `puzzle_mode` enum, composer recipe, mode-baselined fool rate.
-- [x] **11. Originals leaderboard + decoy report share card** — `/leaderboard/originals`, `/leaderboard/spotters`, `/d/<short>` artifact.
+- [x] **9. `puzzle-build` cron** — idempotent composer with 22:00 UTC alarm. *Slot E/P/B bandit: uniform-random stub; replace per plan.*
+- [~] **10. Find-the-Human mode** — *built then reverted in migration 0008 (`drop_dual_mode`); single mode is the only mode now.*
+- [x] **11. Originals leaderboard + line report share card** — `/leaderboard/originals`, `/leaderboard/spotters`, `/d/<short>` artifact, post-reveal "felt most human?" vote (migration 0009), `Humans yesterday: X%` collective stat (migration 0010).
 - [ ] **12. Adaptive difficulty** — `spotter_elo` column exists; ELO update + archetype-by-difficulty pick TODO.
 - [ ] **13. Variable target count + traps** — `target_count` column + `is_trap` flag exist; composer wiring TODO.
 - [ ] **14. Seasons + format rotation + analytics events** — `seasons` and `events` tables exist; populator TODO.
@@ -180,14 +179,14 @@ Deliberate scope choices for v1. Each will become a separate effort when needed.
 
 ## Sample content
 
-`content/sample-2026-06.json` ships four puzzles (`#2`–`#5`, alternating modes) so you can try the inversion immediately:
+`content/sample-2026-06.json` ships two puzzles so you can play through one and have tomorrow's queued up:
 
 ```bash
 make seed                                                # adds puzzle #001 from the prototype
-go run ./cmd/admin import content/sample-2026-06.json    # adds puzzles #002–#005
+go run ./cmd/admin import content/sample-2026-06.json    # adds the sample puzzles
 ```
 
-Then visit `/play/2`, `/play/3`, `/play/4`, `/play/5` to preview each. (The root URL still serves whichever puzzle's `puzzle_date <= today UTC` has the highest `puzzle_number`.)
+The root URL serves whichever puzzle's `puzzle_date <= today UTC` has the highest `puzzle_number`. There's no `/play/<n>` route — historical access is by share URL only (`/r/<short>`, `/d/<short>`), keying on row IDs.
 
 ## Verifying it works
 

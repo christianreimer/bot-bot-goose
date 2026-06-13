@@ -118,7 +118,7 @@ Same mono treatment as tags. States: `pending` (honk tint), `live` (reed tint), 
 
 ## Voice and copy
 
-- Em dashes are banned. The current templates use them in several places ("plant one — your words become tomorrow's trap", "spot the AI hiding among real human answers" — none currently). Replace each with a period, comma, colon, or full stop. Search the templates and remove.
+- Em dashes are banned. Replace each with a period, comma, colon, or mid-dot (`·`). Search the templates and remove. Hyphens are fine; the mid-dot is the brand separator on share lines.
 - The footer tagline ("a bot hides among the humans") is the brand line. Don't restate it as `.sub` content on the play page; that's redundant.
 - Numbers are written numerically (`#002`, `47%`, `3 rounds`). Don't spell them out.
 - "Bot-Dar" is a proper noun. Capitalize it. The grid is "the grid," lowercase.

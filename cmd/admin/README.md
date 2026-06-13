@@ -78,14 +78,14 @@ printed, even on error.
 Returns an array. `puzzle_date` is `YYYY-MM-DD`; `frozen_at` is RFC3339 UTC
 (it's a creation timestamp — `daily_puzzles.frozen_at` is NOT NULL DEFAULT
 NOW() in the schema). Mutations are gated on the puzzle having any **plays**,
-not on `frozen_at`.
+not on `frozen_at`. The `mode` column was dropped by migration 0008 (every
+puzzle is 1 bot + 3 decoys now); legacy field is gone from the output.
 
 ```json
 [
   {
     "puzzle_number": 5,
     "puzzle_date":   "2026-06-15",
-    "mode":          "find_the_bot",
     "frozen_at":     "2026-06-13T09:51:02Z",
     "theme":         null
   }
@@ -94,11 +94,13 @@ not on `frozen_at`.
 
 ### `puzzle show`
 
+`target_kind` on rounds was also dropped by 0008 (every round targets the
+bot). Each round is always 1 bot + 3 decoys; the answer slots reflect that.
+
 ```json
 {
   "puzzle_number": 5,
   "puzzle_date": "2026-06-15",
-  "mode": "find_the_bot",
   "frozen_at": "2026-06-13T09:51:02Z",
   "theme": null,
   "has_plays": false,
@@ -107,7 +109,6 @@ not on `frozen_at`.
       "round_index": 0,
       "prompt_id": "uuid",
       "prompt_text": "...",
-      "target_kind": "bot",
       "target_count": 1,
       "answers": [
         {

@@ -99,8 +99,7 @@ ci: lint test build
 
 build-daily:
 	@DATE_ARG=$${DATE:-}; \
-	MODE_ARG=$${MODE:-}; \
-	go run ./cmd/puzzle-build $${DATE_ARG:+--date=$$DATE_ARG} $${MODE_ARG:+--mode=$$MODE_ARG}
+	go run ./cmd/puzzle-build $${DATE_ARG:+--date=$$DATE_ARG}
 
 bot-gen:
 	@if [ -z "$(PROMPT)" ]; then echo "usage: make bot-gen PROMPT=\"...\" N=12"; exit 1; fi

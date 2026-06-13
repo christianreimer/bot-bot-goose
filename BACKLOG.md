@@ -22,7 +22,7 @@ Each item links to the plan's build-order step it's part of.
 
 ### Magic-link email auth (build-order step 3)
 
-**Why it matters.** Anonymous device cookies cover first-play, but a phone wipe currently loses your streak, your decoys, and your forger rank. Magic-link upgrade is the lowest-friction account model that solves all three.
+**Why it matters.** Anonymous device cookies cover first-play, but a phone wipe currently loses your streak, your lines, and your Originals rank. Magic-link upgrade is the lowest-friction account model that solves all three.
 
 **What's needed.**
 
@@ -65,7 +65,7 @@ Each item links to the plan's build-order step it's part of.
 
 **What's needed.**
 
-- Thompson sampling on a Beta prior, mode-baselined (centered at 0.25 for find_the_bot, 0.75 for find_the_human).
+- Thompson sampling on a Beta prior, centered at the realest baseline (1/3) — the rate the post-reveal "felt most human?" vote would settle to under pure chance.
 - Author exclusion at serve time, not just build time (a puzzle is served to many users for the same UTC day).
 - Replace `pickApprovedDecoys` in `cmd/puzzle-build/main.go` — the contract there is the stable surface.
 

@@ -725,7 +725,7 @@ func puzzleSetAnswer(ctx context.Context, log *slog.Logger) error {
 //
 // `puzzle replace --number N --content file.json [--confirm-plays K]` is the
 // destructive swap operators reach for when today's puzzle needs to be rebuilt
-// (broken decoy reported, mode change, hand-authored override). It composes:
+// (broken decoy reported, hand-authored override). It composes:
 //
 //   1. Read + structurally validate the JSON.
 //   2. Confirm the file's puzzle_number matches --number.

@@ -8,7 +8,7 @@ The cultural bet: *can you still tell a human from an AI?* is a loaded question 
 
 ## Register
 
-**Product** for the playable surfaces (`/play`, `/me`, `/leaderboard/*`): design serves the 90-second ritual. **Brand** at the share artifacts (`/r/<short>`, `/d/<short>`, OG images): these are public-facing posters and should read as editorial objects.
+**Product** for the playable surfaces (`/`, `/me`, `/leaderboard/*`): design serves the 90-second ritual. **Brand** at the share artifacts (`/r/<short>`, `/d/<short>`, OG images): these are public-facing posters and should read as editorial objects.
 
 Both registers share the same palette, type stack, and component vocabulary. Share pages lean more typographic.
 
@@ -26,7 +26,7 @@ This scene forces:
 
 The default player is a casual daily-puzzle person: they already do Wordle, Connections, Mini. They are not a "game player." They will spend 90 seconds and leave. They come back tomorrow because it's a small ritual, not because the game is deep.
 
-A secondary user is the **forger** — a player who returns because they want their decoys planted in tomorrow's puzzle. Their motivation is to fool strangers and climb the forger leaderboard. The product earns this loop with the contribution flow and `/me`.
+A secondary user is the **original** — a player who returns because they want their lines added to tomorrow's puzzle. Their motivation is to read more human than the actual humans and climb the Originals leaderboard (the room votes "felt most human?" after each reveal). The product earns this loop with the contribution flow and `/me`.
 
 ## Voice
 
@@ -55,10 +55,10 @@ What this product is **not** allowed to look like:
 - **A SaaS dashboard.** No big-number hero metrics with stacked supporting stats. No gradient cards with icon + heading + body.
 - **A neon AI-vs-human "battle" theme.** No glitch fonts, no scanlines, no terminal green, no "matrix" imagery.
 - **An indie-cute mascot game.** The goose is a typographic mark, not a character. No animated mascot pages.
-- **A community/social product.** No avatars, profile bios, follow graphs, comments. The forger leaderboard is the only social surface and it stays anonymous-by-default.
+- **A community/social product.** No avatars, profile bios, follow graphs, comments. The Originals leaderboard is the only social surface and it stays anonymous-by-default.
 
 ## What "good" looks like
 
-A returning player opens `/`, sees `#012`, plays three rounds, gets their Bot-Dar score, shares the grid to one place, optionally writes a decoy, and closes the tab. The whole loop is under two minutes. They don't think about the design at all. The next day they do it again.
+A returning player opens `/`, sees `#012`, plays three rounds, gets their Bot-Dar score, shares the grid to one place, optionally adds a line, and closes the tab. The whole loop is under two minutes. They don't think about the design at all. The next day they do it again.
 
 A new player arrives via someone else's shared grid, the OG card unfurls into something that looks like a poster, not a screenshot, and they tap through to play.

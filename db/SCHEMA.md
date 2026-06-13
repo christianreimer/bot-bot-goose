@@ -1,10 +1,11 @@
 # Database schema — Bot Bot Goose
 
-PostgreSQL, 26 tables. Defined in `db/migrations/0001_init.sql` and patched by 0002–0005.
+PostgreSQL, 27 tables. Defined in `db/migrations/0001_init.sql` and patched by 0002–0010.
 
 **Enums:**
 - `moderation_status` ∈ `pending` | `approved` | `rejected` | `retired`
-- `puzzle_mode` ∈ `find_the_bot` | `find_the_human`
+
+> The `puzzle_mode` enum and the dual-mode "Find the Human" plumbing it carried were dropped by migration `0008_drop_dual_mode.sql`. Every puzzle is now 1 bot + 3 decoys.
 
 In example rows, UUIDs are shown as 8-char prefixes (`a1b2c3d4…`) for readability — real values are full UUIDs.
 
@@ -31,13 +32,15 @@ The account/profile row. Anonymous device users get one too.
 **FKs out:** none.
 **FKs in:** referenced by ~15 tables; central identity row.
 
+**Auto-handle on insert:** migration 0007 added a sequence `anonymous_goose_seq` and a backfill that assigns `'AnonymousGoose' || nextval('anonymous_goose_seq')` to every NULL-handle live user. The runtime `CreateAnonymousUser` keeps populating the same shape on each new device cookie, so the `handle` column is effectively always non-empty on live rows; the manual-handle path reserves the `AnonymousGoose*` namespace to prevent collision.
+
 **Example rows:**
 
-| id           | handle    | email                 | role     | spotter_elo | display_anonymous |
-|--------------|-----------|-----------------------|----------|-------------|-------------------|
-| `a1b2c3d4…`  | `alice`   | `alice@example.com`   | player   | 1247        | false             |
-| `b5c6d7e8…`  | `bob_42`  | `bob@example.com`     | reviewer | 1380        | true              |
-| `c9d0e1f2…`  | *(null)*  | *(null)*              | player   | 1200        | false             |
+| id           | handle               | email                 | role     | spotter_elo | display_anonymous |
+|--------------|----------------------|-----------------------|----------|-------------|-------------------|
+| `a1b2c3d4…`  | `alice`              | `alice@example.com`   | player   | 1247        | false             |
+| `b5c6d7e8…`  | `bob_42`             | `bob@example.com`     | reviewer | 1380        | true              |
+| `c9d0e1f2…`  | `AnonymousGoose1184` | *(null)*              | player   | 1200        | false             |
 
 ### `device_cookies`
 
@@ -230,7 +233,7 @@ Reviewer paper trail across content kinds.
 
 ### `pre_launch_submissions`
 
-Reddit-harvest campaign submissions. Migration 0005 made them anonymous-capable.
+Reddit-harvest campaign submissions. Migration 0005 made them anonymous-capable; 0006 added soft-reject.
 
 | Column                | Type                       | Notes                                                |
 |-----------------------|----------------------------|------------------------------------------------------|
@@ -240,18 +243,23 @@ Reddit-harvest campaign submissions. Migration 0005 made them anonymous-capable.
 | `text`                | TEXT NOT NULL              |                                                      |
 | `consent_at`          | TIMESTAMPTZ                |                                                      |
 | `ingested_decoy_id`   | UUID                       | FK `→ decoy_submissions.id`; bridge into live pool   |
-| `user_id`             | UUID                       | FK `→ users.id` (SET NULL)                           |
-| `requested_ip`        | INET                       |                                                      |
+| `user_id`             | UUID                       | FK `→ users.id` (SET NULL); added in 0005            |
+| `requested_ip`        | INET                       | added in 0005                                        |
+| `rejected_at`         | TIMESTAMPTZ                | nullable; soft-reject from harvest reviewer (0006)   |
+
+**Three terminal states (post-0006):** still-pending (`ingested_decoy_id IS NULL AND rejected_at IS NULL`), ingested (`ingested_decoy_id` set), soft-rejected (`rejected_at` set). The text + IP stay on rejected rows for spam triage instead of being destroyed by DELETE.
 
 **Unique partial index:** `(user_id, prompt_id) WHERE user_id IS NOT NULL` — one per device per prompt.
 **Plain index:** `(prompt_id)` for the harvest-deck counter.
+**Partial index (0006):** `(prompt_id) WHERE rejected_at IS NULL` — keeps the under-supplied counter cheap as the rejected pile grows.
 
 **Example rows:**
 
-| id    | email             | prompt_id   | text                                  | ingested_decoy_id | user_id     |
-|-------|-------------------|-------------|---------------------------------------|-------------------|-------------|
-| `pl1…`| *(null)*          | `p1a2b3c4…` | take the freeway, never the bridge    | `dc4…`            | `c9d0e1f2…` |
-| `pl2…`| `fan@example.com` | `p5d6e7f8…` | I open my laptop before my eyes work. | *(null)*          | *(null)*    |
+| id    | email             | prompt_id   | text                                  | ingested_decoy_id | rejected_at            | user_id     |
+|-------|-------------------|-------------|---------------------------------------|-------------------|------------------------|-------------|
+| `pl1…`| *(null)*          | `p1a2b3c4…` | take the freeway, never the bridge    | `dc4…`            | *(null)*               | `c9d0e1f2…` |
+| `pl2…`| `fan@example.com` | `p5d6e7f8…` | I open my laptop before my eyes work. | *(null)*          | *(null)*               | *(null)*    |
+| `pl3…`| *(null)*          | `p9a0b1c2…` | asdfasdf                              | *(null)*          | 2026-06-12 18:02:11+00 | `c9d0e1f2…` |
 
 ---
 
@@ -279,33 +287,32 @@ Long-lived buckets carrying a roster snapshot.
 
 ### `daily_puzzles`
 
-One row per playable date.
+One row per playable date. The `mode` column was dropped by migration 0008 (single mode).
 
 | Column          | Type                           | Notes                                                                |
 |-----------------|--------------------------------|----------------------------------------------------------------------|
 | `id`            | UUID PK                        |                                                                      |
 | `puzzle_number` | INT NOT NULL UNIQUE            | the natural/external key (e.g. "puzzle #142")                        |
 | `puzzle_date`   | DATE NOT NULL                  |                                                                      |
-| `mode`          | `puzzle_mode`, default `find_the_bot` |                                                              |
 | `frozen_at`     | TIMESTAMPTZ NOT NULL, default NOW() | **informational**, not an editability gate — set on insert     |
 | `theme`         | TEXT                           |                                                                      |
 | `season_id`     | UUID                           | FK `→ seasons.id`                                                    |
 
 **FKs in:** `puzzle_rounds.daily_puzzle_id` (CASCADE), `plays.daily_puzzle_id`.
 **Indexed on `puzzle_date`.**
-**Non-FK ref in:** `streaks.last_played_puzzle_number` carries `puzzle_number` (the natural key), not `id`.
+**Non-FK ref in:** `streaks.last_played_puzzle_number` carries `puzzle_number` (the natural key), not `id`. `daily_collective_stats.puzzle_number` does too (see §5).
 
 **Example rows:**
 
-| id    | puzzle_number | puzzle_date | mode            | frozen_at              | theme |
-|-------|---------------|-------------|-----------------|------------------------|-------|
-| `dp1…`| 1             | 2026-06-12  | find_the_bot    | 2026-06-12 00:00:00+00 | -     |
-| `dp2…`| 2             | 2026-06-13  | find_the_bot    | 2026-06-12 12:00:00+00 | -     |
-| `dp3…`| 6             | 2026-06-17  | find_the_human  | 2026-06-12 12:00:00+00 | music |
+| id    | puzzle_number | puzzle_date | frozen_at              | theme |
+|-------|---------------|-------------|------------------------|-------|
+| `dp1…`| 1             | 2026-06-12  | 2026-06-12 00:00:00+00 | -     |
+| `dp2…`| 2             | 2026-06-13  | 2026-06-12 12:00:00+00 | -     |
+| `dp3…`| 6             | 2026-06-17  | 2026-06-12 12:00:00+00 | music |
 
 ### `puzzle_rounds`
 
-The three rounds of a puzzle.
+The three rounds of a puzzle. The `target_kind` column was dropped by migration 0008 (every round targets the bot now).
 
 | Column            | Type                  | Notes                                            |
 |-------------------|-----------------------|--------------------------------------------------|
@@ -313,19 +320,18 @@ The three rounds of a puzzle.
 | `daily_puzzle_id` | UUID NOT NULL         | FK `→ daily_puzzles.id` CASCADE                  |
 | `round_index`     | SMALLINT NOT NULL     | 0, 1, or 2                                       |
 | `prompt_id`       | UUID NOT NULL         | FK `→ prompts.id`                                |
-| `target_kind`     | TEXT CHECK ∈ ('bot','human') | what the player hunts                     |
-| `target_count`    | SMALLINT, default 1   |                                                  |
+| `target_count`    | SMALLINT, default 1   | forward-compat for variable-target days          |
 
 **Unique:** `(daily_puzzle_id, round_index)`.
 **FKs in:** `puzzle_round_answers.round_id` (CASCADE).
 
 **Example rows:**
 
-| id    | daily_puzzle_id | round_index | prompt_id   | target_kind | target_count |
-|-------|-----------------|-------------|-------------|-------------|--------------|
-| `r1…` | `dp1…`          | 0           | `p1a2b3c4…` | bot         | 1            |
-| `r2…` | `dp1…`          | 1           | `p5d6e7f8…` | bot         | 1            |
-| `r3…` | `dp1…`          | 2           | `p9a0b1c2…` | bot         | 1            |
+| id    | daily_puzzle_id | round_index | prompt_id   | target_count |
+|-------|-----------------|-------------|-------------|--------------|
+| `r1…` | `dp1…`          | 0           | `p1a2b3c4…` | 1            |
+| `r2…` | `dp1…`          | 1           | `p5d6e7f8…` | 1            |
+| `r3…` | `dp1…`          | 2           | `p9a0b1c2…` | 1            |
 
 ### `puzzle_round_answers`
 
@@ -386,16 +392,17 @@ One per (user, puzzle).
 
 One row per round inside a play.
 
-| Column             | Type                       | Notes                                                                  |
-|--------------------|----------------------------|------------------------------------------------------------------------|
-| `id`               | UUID PK                    |                                                                        |
-| `play_id`          | UUID NOT NULL              | FK `→ plays.id` CASCADE                                                |
-| `round_index`      | SMALLINT NOT NULL          | 0/1/2                                                                  |
-| `slot_permutation` | SMALLINT[] NOT NULL        | `slot_permutation[i]` = canonical ordinal at client slot `i`           |
-| `hint_used`        | BOOL, default false        |                                                                        |
-| `removed_slot`     | SMALLINT                   | nullable; remembered hint                                              |
-| `started_at`       | TIMESTAMPTZ                |                                                                        |
-| `committed_at`     | TIMESTAMPTZ                | once the guess locks in                                                |
+| Column              | Type                       | Notes                                                                  |
+|---------------------|----------------------------|------------------------------------------------------------------------|
+| `id`                | UUID PK                    |                                                                        |
+| `play_id`           | UUID NOT NULL              | FK `→ plays.id` CASCADE                                                |
+| `round_index`       | SMALLINT NOT NULL          | 0/1/2                                                                  |
+| `slot_permutation`  | SMALLINT[] NOT NULL        | `slot_permutation[i]` = canonical ordinal at client slot `i`           |
+| `hint_used`         | BOOL, default false        |                                                                        |
+| `removed_slot`      | SMALLINT                   | nullable; remembered hint                                              |
+| `started_at`        | TIMESTAMPTZ                |                                                                        |
+| `committed_at`      | TIMESTAMPTZ                | once the guess locks in                                                |
+| `realest_decoy_id`  | UUID                       | FK `→ decoy_submissions.id` (SET NULL); the player's post-reveal "felt most human?" vote (0009). NULL = vote skipped. Re-voting on the same round overwrites this. |
 
 **Unique:** `(play_id, round_index)`.
 **Non-FK join to `puzzle_rounds`:** matched by `(plays.daily_puzzle_id, round_index)` — no direct FK. Pattern from `internal/db/play.go:320-322`:
@@ -463,65 +470,96 @@ Singleton per user.
 
 ### `decoy_daily_stats`
 
-Per-decoy, per-day, per-mode impressions and "picked as bot" counts.
+Per-decoy, per-day counters. Two tracks: the legacy **fool** track (display-only flavor now) and the **realest** track (the new primary ranking surface). Migration 0008 collapsed the PK to `(decoy_id, stat_date)`; migration 0009 added the realest columns.
 
-| Column          | Type                           | Notes                              |
-|-----------------|--------------------------------|------------------------------------|
-| `decoy_id`      | UUID NOT NULL                  | part of PK; FK `→ decoy_submissions.id` CASCADE |
-| `stat_date`     | DATE NOT NULL                  | part of PK                         |
-| `mode`          | `puzzle_mode` NOT NULL         | part of PK                         |
-| `impressions`   | INT, default 0                 |                                    |
-| `picked_as_bot` | INT, default 0                 | how often guessers picked this decoy thinking it was the bot |
+| Column                | Type                           | Notes                              |
+|-----------------------|--------------------------------|------------------------------------|
+| `decoy_id`            | UUID NOT NULL                  | part of PK; FK `→ decoy_submissions.id` CASCADE |
+| `stat_date`           | DATE NOT NULL                  | part of PK                         |
+| `impressions`         | INT, default 0                 | fool-track impressions             |
+| `picked_as_bot`       | INT, default 0                 | fool-track: how often guessers picked this decoy thinking it was the bot |
+| `realest_impressions` | INT, default 0                 | realest-track impressions (added 0009) — +1 to each of the 3 human decoys when the player casts a vote |
+| `realest_votes`       | INT, default 0                 | realest-track votes earned (added 0009) — +1 to the chosen decoy |
 
-**Composite PK:** `(decoy_id, stat_date, mode)`.
+**Composite PK:** `(decoy_id, stat_date)`.
 
 **Example rows:**
 
-| decoy_id | stat_date  | mode         | impressions | picked_as_bot |
-|----------|------------|--------------|-------------|---------------|
-| `dc1…`   | 2026-06-12 | find_the_bot | 312         | 47            |
-| `dc2…`   | 2026-06-12 | find_the_bot | 298         | 18            |
+| decoy_id | stat_date  | impressions | picked_as_bot | realest_impressions | realest_votes |
+|----------|------------|-------------|---------------|---------------------|---------------|
+| `dc1…`   | 2026-06-12 | 312         | 47            | 201                 | 88            |
+| `dc2…`   | 2026-06-12 | 298         | 18            | 198                 | 41            |
 
 ### `archetype_daily_stats`
 
-Per-archetype catch/impression counters.
+Per-archetype catch/impression counters. Migration 0008 collapsed the PK to `(archetype_id, stat_date)`.
 
 | Column         | Type                   | Notes                              |
 |----------------|------------------------|------------------------------------|
 | `archetype_id` | UUID NOT NULL          | part of PK; FK `→ archetypes.id` CASCADE |
 | `stat_date`    | DATE NOT NULL          | part of PK                         |
-| `mode`         | `puzzle_mode` NOT NULL | part of PK                         |
 | `impressions`  | INT, default 0         |                                    |
 | `catches`      | INT, default 0         | how often guessers correctly caught this archetype |
 
-**Composite PK:** `(archetype_id, stat_date, mode)`.
+**Composite PK:** `(archetype_id, stat_date)`.
 
 **Example rows:**
 
-| archetype_id | stat_date  | mode         | impressions | catches |
-|--------------|------------|--------------|-------------|---------|
-| `ar1…`       | 2026-06-12 | find_the_bot | 102         | 64      |
-| `ar3…`       | 2026-06-12 | find_the_bot | 102         | 22      |
+| archetype_id | stat_date  | impressions | catches |
+|--------------|------------|-------------|---------|
+| `ar1…`       | 2026-06-12 | 102         | 64      |
+| `ar3…`       | 2026-06-12 | 102         | 22      |
 
 ### `forger_rankings`
 
-Cached leaderboard row per author. Recomputed nightly by `bbg-admin rollup`.
+Cached leaderboard row per author. Table name kept for stability; the **player-facing surface is the Originals leaderboard** at `/leaderboard/originals`. Recomputed nightly by `bbg-admin rollup` → `internal/leaderboard.Rollup`.
 
-| Column                | Type                       | Notes                                  |
-|-----------------------|----------------------------|----------------------------------------|
-| `user_id`             | UUID PK                    | also FK `→ users.id` CASCADE           |
-| `adjusted_fool_rate`  | NUMERIC, default 0.25      | 0..1                                   |
-| `total_impressions`   | INT, default 0             |                                        |
-| `total_picked_as_bot` | INT, default 0             |                                        |
-| `tier`                | TEXT, default 'Decoy'      | also `Forger`, `Master`, …             |
-| `computed_at`         | TIMESTAMPTZ                |                                        |
+Migration 0009 added the four `realest_*` columns alongside the legacy fool-rate columns. The leaderboard orders by `adjusted_realest_rate`; the fool columns ride along as display-only flavor on the per-line report card.
+
+| Column                       | Type                  | Notes                                                          |
+|------------------------------|-----------------------|----------------------------------------------------------------|
+| `user_id`                    | UUID PK               | also FK `→ users.id` CASCADE                                   |
+| `adjusted_fool_rate`         | NUMERIC, default 0.25 | 0..1; flavor only since 0009                                   |
+| `total_impressions`          | INT, default 0        | fool-track impressions                                         |
+| `total_picked_as_bot`        | INT, default 0        | fool-track picks                                               |
+| `adjusted_realest_rate`      | NUMERIC, default 0.3333 | 0..1; **the ranked metric** (0009). Anchored at chance = 1/3 |
+| `realest_total_impressions`  | INT, default 0        | realest-track impressions (0009)                               |
+| `realest_total_votes`        | INT, default 0        | realest-track votes (0009)                                     |
+| `realest_beyond_chance`      | INT, default 0        | `votes − impressions·(1/3)`, floored at 0 (0009)               |
+| `tier`                       | TEXT, default 'Decoy' | **DB default still says 'Decoy'**, but the application writes one of the current ladder values on every rollup. The default is never observed except on a never-rolled-up user. |
+| `computed_at`                | TIMESTAMPTZ           |                                                                |
+
+**Tier ladder (current, written by `internal/leaderboard.TierFor`):** `Quiet → Voice → Standout → Unmistakable → The Realest`. The entry tier was renamed from `Decoy` to `Quiet` in the codebase (ties to the "Reads quiet" flop copy); the DB column default was left as `'Decoy'` since it isn't observable in practice.
 
 **Example rows:**
 
-| user_id     | adjusted_fool_rate | total_impressions | total_picked_as_bot | tier   |
-|-------------|--------------------|-------------------|---------------------|--------|
-| `a1b2c3d4…` | 0.41               | 1208              | 491                 | Forger |
-| `b5c6d7e8…` | 0.18               | 642               | 117                 | Decoy  |
+| user_id     | adjusted_realest_rate | realest_total_impressions | realest_total_votes | realest_beyond_chance | adjusted_fool_rate | total_impressions | total_picked_as_bot | tier      |
+|-------------|-----------------------|---------------------------|---------------------|-----------------------|--------------------|-------------------|---------------------|-----------|
+| `a1b2c3d4…` | 0.46                  | 1208                      | 542                 | 139                   | 0.41               | 1208              | 491                 | Standout  |
+| `b5c6d7e8…` | 0.24                  | 642                       | 154                 | 0                     | 0.18               | 642               | 117                 | Quiet     |
+
+### `daily_collective_stats`
+
+Frozen "yesterday, humans caught the goose X%" stat (migration 0010). One row per past puzzle. Computed and upserted by `internal/collective.Rollup` during the nightly job; the application layer applies a min-plays floor (currently `collective.MinPlaysFloor = 20`) before publishing.
+
+| Column          | Type                       | Notes                                                                |
+|-----------------|----------------------------|----------------------------------------------------------------------|
+| `puzzle_number` | INT PK                     | natural key into `daily_puzzles.puzzle_number` (no FK declared)      |
+| `stat_date`     | DATE NOT NULL              | the puzzle's date, copied from `daily_puzzles.puzzle_date`           |
+| `catch_pct`     | INT NOT NULL               | 0..100, `round(AVG(score_pct))` over completed plays of that puzzle  |
+| `total_plays`   | INT NOT NULL               | count of contributing plays — read-side floor decides if it qualifies |
+| `computed_at`   | TIMESTAMPTZ NOT NULL       | when the row was frozen                                              |
+
+**Why a frozen row?** The number must be identical across all viewers, stable across the day, and screenshot-proof. A live `AVG()` query would drift as more plays land. The rollup picks the most recent puzzle whose `puzzle_date < CURRENT_DATE UTC`, averages the per-play Bot-Dar, and upserts. Idempotent on `puzzle_number`.
+
+**Surfaces using this:** result page (`Yesterday, humans caught the goose X%.`), shared text card (`Humans yesterday: X%`), and the OG image's muted footer line.
+
+**Example rows:**
+
+| puzzle_number | stat_date  | catch_pct | total_plays | computed_at            |
+|---------------|------------|-----------|-------------|------------------------|
+| 11            | 2026-06-12 | 64        | 1842        | 2026-06-13 03:01:11+00 |
+| 10            | 2026-06-11 | 71        | 1620        | 2026-06-12 03:01:09+00 |
 
 ---
 
@@ -658,6 +696,9 @@ puzzle_rounds  ←—— puzzle_round_answers (CASCADE)
 
 plays         ←—— play_rounds (CASCADE)
 play_rounds   ←—— play_guesses (CASCADE)
+play_rounds.realest_decoy_id  → decoy_submissions  (SET NULL; per-round vote, 0009)
+
+daily_collective_stats  → daily_puzzles  (natural key on puzzle_number; no FK, 0010)
 ```
 
 ## The non-FK joins to know about
@@ -669,6 +710,7 @@ play_rounds   ←—— play_guesses (CASCADE)
 | `moderation_reviews.target_*`        | polymorphic: `bot_candidate \| decoy_submission \| prompt`| One table fans out to three parents. Indexed for lookup.                  |
 | `audit_log.target_*`                 | polymorphic: any table                                    | Universal trail; intentionally untyped.                                   |
 | `streaks.last_played_puzzle_number`  | `daily_puzzles.puzzle_number` (natural key, not id)       | The display number, not the surrogate UUID, is what gates streak advance. |
+| `daily_collective_stats.puzzle_number` | `daily_puzzles.puzzle_number` (natural key, not id)     | Same reasoning as `streaks` — the display number is the join key; soft-deleting a puzzle row is not a workflow we support. |
 | `puzzle_round_answers.answer_text`   | denormalized snapshot of bot/decoy text                   | Historical puzzles must stay stable if the source row is retired or soft-deleted. |
 | `pre_launch_submissions.ingested_decoy_id` | optional FK — null until the harvested row is promoted into the live pool | Two-stage ingest. |
 
