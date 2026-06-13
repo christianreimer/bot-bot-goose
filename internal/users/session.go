@@ -95,6 +95,32 @@ func resolveOrMint(ctx context.Context, d *db.DB, secret []byte, presented, ua s
 	return &db.User{ID: userID, Handle: &handle, Role: "player", SpotterELO: 1200}, signed, nil
 }
 
+// ResolveOnly looks up the user behind a presented device cookie if one
+// exists and is valid. It does NOT mint a new identity when the cookie
+// is missing or unrecognized — that's the difference from the regular
+// session middleware. Returns (nil, nil) when no user can be resolved
+// without writing. Used by the privacy page so that a reader who's
+// never played gets no cookie set just for visiting.
+func ResolveOnly(ctx context.Context, d *db.DB, secret []byte, r *http.Request) (*db.User, error) {
+	raw, _ := readCookie(r)
+	if raw == "" {
+		return nil, nil
+	}
+	cleartext, ok := unwrapCookie(secret, raw)
+	if !ok {
+		return nil, nil
+	}
+	hash := hashCookie(cleartext)
+	u, err := d.UserByCookieHash(ctx, hash)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return u, nil
+}
+
 // newCookieValue returns 32 random bytes, base64url-encoded. The cleartext
 // never leaves the server-side cookie value; we store only its SHA-256.
 func newCookieValue() string {
