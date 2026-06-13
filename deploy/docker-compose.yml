@@ -42,14 +42,16 @@ services:
       BBG_RESEND_API_KEY: ${BBG_RESEND_API_KEY:-}
       BBG_EMAIL_FROM: ${BBG_EMAIL_FROM:-Bot Bot Goose <noreply@localhost>}
       # BBG_DEV=1 keeps cookies non-Secure so they survive plain HTTP from
-      # ngrok or curl smoke tests. Leave unset in production behind Caddy.
+      # curl smoke tests. Leave unset in production behind a TLS-terminating
+      # proxy (Caddy or the Cloudflare Tunnel edge).
       BBG_DEV: ${BBG_DEV:-}
       TZ: UTC
     expose:
       - "8080"
-    # Loopback-only port mapping so tools like ngrok can hit the Go app
-    # directly without going through Caddy's HTTP→HTTPS redirect. Safe
-    # because it's bound to 127.0.0.1, not 0.0.0.0.
+    # Loopback-only port mapping so the local Cloudflare Tunnel daemon
+    # (and curl smoke tests) can hit the Go app directly without going
+    # through Caddy's HTTP→HTTPS redirect. Safe because it's bound to
+    # 127.0.0.1, not 0.0.0.0.
     ports:
       - "127.0.0.1:8080:8080"
 

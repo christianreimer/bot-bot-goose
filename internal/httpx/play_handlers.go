@@ -79,7 +79,8 @@ func (s *Server) handlePlayLanding(w http.ResponseWriter, r *http.Request) {
 func (s *Server) renderPlayPage(w http.ResponseWriter, r *http.Request, puzzle *db.DailyPuzzle) {
 	u := users.FromContext(r.Context())
 	// Derive the base URL from the request so share artifacts carry the URL
-	// the player actually browsed (e.g., the ngrok host), not BBG_BASE_URL.
+	// the player actually browsed (e.g., the Cloudflare Tunnel host),
+	// not BBG_BASE_URL.
 	baseURL := s.requestBaseURL(r)
 	state, err := s.composePlayState(r.Context(), u, puzzle, baseURL)
 	if err != nil {

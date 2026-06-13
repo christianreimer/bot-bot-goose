@@ -4,8 +4,8 @@ import "net/http"
 
 // requestBaseURL returns the scheme://host the browser used to reach this
 // request. Honors X-Forwarded-Proto + X-Forwarded-Host (set by Caddy and
-// ngrok) so share cards link back to the URL the player actually browsed,
-// not the BBG_BASE_URL the server was started with.
+// the Cloudflare Tunnel daemon) so share cards link back to the URL the
+// player actually browsed, not the BBG_BASE_URL the server was started with.
 //
 // Falls back to s.cfg.BaseURL if the request has no useful host hints,
 // which only happens in synthetic test contexts. Production requests

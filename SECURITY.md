@@ -35,7 +35,7 @@ Less interesting (but still welcome) reports:
 Out of scope unless they enable one of the above:
 
 - Issues that require an attacker already controlling the server or its environment.
-- Issues in third-party services (Cloudflare, ngrok, Postmark, Anthropic) themselves.
+- Issues in third-party services (Cloudflare, Resend, Anthropic) themselves.
 - Self-XSS or other issues that require the victim to copy/paste hostile content into their own browser console.
 - Missing security headers that don't enable a concrete attack.
 
