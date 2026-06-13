@@ -90,21 +90,21 @@ func DecoyReportCard(rep DecoyReport, baseURL string) string {
 	switch {
 	case rep.Status == "pending":
 		// Anticipation copy from §4 payoff loop beat 1.
-		return fmt.Sprintf("🪿 Bot Bot Goose — Decoy Report\n%q\n\n🪶 Planted. Goes live after review — we'll tell you how many you fool.\n%s",
+		return fmt.Sprintf("🪿 Bot Bot Goose · Decoy Report\n%q\n\n🪶 Planted. Goes live after review. We'll tell you how many you fool.\n%s",
 			rep.Text, host)
 	case rep.Status == "rejected", rep.Status == "retired":
-		return fmt.Sprintf("🪿 Bot Bot Goose — Decoy Report\n%q\n\n— retired —\n%s",
+		return fmt.Sprintf("🪿 Bot Bot Goose · Decoy Report\n%q\n\nretired\n%s",
 			rep.Text, host)
 	case rep.Impressions == 0:
-		return fmt.Sprintf("🪿 Bot Bot Goose — Decoy Report\n%q\n\n🪶 Live. Waiting for its first impressions.\n%s",
+		return fmt.Sprintf("🪿 Bot Bot Goose · Decoy Report\n%q\n\n🪶 Live. Waiting for its first impressions.\n%s",
 			rep.Text, host)
 	case rep.RawPct < 15:
 		// §4 flop copy: warm reframe, not punishing.
-		return fmt.Sprintf("🪿 Bot Bot Goose — Decoy Report\n%q\n\n🧑 Too human — only %d%% thought I was a bot.\nOut of %d impressions, you're unmistakably one of us.\n%s",
+		return fmt.Sprintf("🪿 Bot Bot Goose · Decoy Report\n%q\n\n🧑 Too human. Only %d%% thought I was a bot.\nOut of %d impressions, you're unmistakably one of us.\n%s",
 			rep.Text, rep.RawPct, rep.Impressions, host)
 	default:
 		// §4 payoff card.
-		main := fmt.Sprintf("🪿 Bot Bot Goose — Decoy Report\n%q\n\n🤖 %d%% of humans think I'm a bot — %d fooled",
+		main := fmt.Sprintf("🪿 Bot Bot Goose · Decoy Report\n%q\n\n🤖 %d%% of humans think I'm a bot · %d fooled",
 			rep.Text, rep.RawPct, rep.Fooled)
 		if rep.BeyondChance > 0 {
 			main += fmt.Sprintf(" · +%d beyond chance", rep.BeyondChance)

@@ -95,7 +95,7 @@ func (s *Server) sendMagicEmail(ctx context.Context, to, link string) error {
 This link expires in 15 minutes and can only be used once.
 If you didn't ask to sign in, ignore this email.
 
-— Bot Bot Goose
+Bot Bot Goose
 `, link)
 	html := fmt.Sprintf(`<!doctype html>
 <html><body style="font-family:system-ui,sans-serif;line-height:1.5;color:#14232b;">

@@ -25,7 +25,7 @@
                 · <b>#{{ .Rank }} of {{ .OfTotal }}</b>{{ if .Tier }} · {{ .Tier }}{{ end }}
               {{ end }}
             </span>
-            <span class="standing-stat">{{ if .Stat }}{{ .Stat }}{{ else }}—{{ end }}</span>
+            <span class="standing-stat">{{ if .Stat }}{{ .Stat }}{{ else }}·{{ end }}</span>
           </div>
           <div class="standing-note">{{ .Note }}</div>
         </a>
