@@ -107,14 +107,23 @@ func RenderResultOG(r ResultOG) ([]byte, error) {
 		gridX += cellSize + gap
 	}
 
-	// Score line below the grid.
+	// Score line below the grid. Sweep gets a different treatment: the
+	// percentage drops to muted (no honk celebration of a 0%) and the
+	// leading verb shifts from "Bot-Dar X%" to "Goose got away".
 	pct := game.ScorePct(r.Outcomes)
 	statLabel := "Bot-Dar"
+	target := "Goose"
 	if r.Mode == game.FindTheHuman {
 		statLabel = "Human-Dar"
+		target = "Human"
 	}
 	scoreLine := fmt.Sprintf("%s %d%%", statLabel, pct)
-	drawString(img, face48, scoreLine, cardX+36, cardY+cardH-44, colorHonk)
+	scoreColor := colorHonk
+	if pct == 0 {
+		scoreLine = fmt.Sprintf("%s got away · %s 0%%", target, statLabel)
+		scoreColor = colorMuted
+	}
+	drawString(img, face48, scoreLine, cardX+36, cardY+cardH-44, scoreColor)
 
 	if r.Streak > 0 {
 		streakLine := fmt.Sprintf("streak %d", r.Streak)

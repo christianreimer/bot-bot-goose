@@ -53,15 +53,23 @@ func Card(puzzleNumber int32, outcomes []game.Outcome, mode game.Mode, streak in
 	icon := IconFindBot
 	title := "Daily Goose"
 	statLabel := "Bot-Dar"
+	target := "Goose"
 	if mode == game.FindTheHuman {
 		icon = IconFindHuman
 		title = "Daily Human"
 		statLabel = "Human-Dar"
+		target = "Human"
+	}
+	// 0/3 sweep is not a success. Prefix the score line so the share text
+	// states the outcome honestly rather than reading like a bare stat.
+	scoreLine := fmt.Sprintf("%s %d%%  ·  🔥%d", statLabel, pct, streak)
+	if pct == 0 {
+		scoreLine = fmt.Sprintf("%s got away  ·  %s 0%%  ·  🔥%d", target, statLabel, streak)
 	}
 	// Full URL (with scheme) so iMessage/WhatsApp/etc. auto-detect it and
 	// can render a rich preview from the og:image at /r/<short>/og.png.
-	return fmt.Sprintf("%s %s #%03d\n%s\n%s %d%%  ·  🔥%d\n%s",
-		icon, title, puzzleNumber, Grid(outcomes), statLabel, pct, streak, withScheme(baseURL))
+	return fmt.Sprintf("%s %s #%03d\n%s\n%s\n%s",
+		icon, title, puzzleNumber, Grid(outcomes), scoreLine, withScheme(baseURL))
 }
 
 // DecoyReport is the per-decoy share artifact from design doc §4 — the

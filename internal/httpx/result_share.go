@@ -31,10 +31,18 @@ func (s *Server) handleResultShare(w http.ResponseWriter, r *http.Request) {
 	imgURL := baseURL + "/r/" + shortID + "/og.png"
 
 	statLabel := "Bot-Dar"
-	titleVerb := "spotted the goose"
+	target := "goose"
 	if pp.Mode == game.FindTheHuman {
 		statLabel = "Human-Dar"
-		titleVerb = "spotted the human"
+		target = "human"
+	}
+	// Sweep (0/3) is not a success — don't frame it as one. Mirrors the
+	// strike-through "caught → got away" treatment on the player-facing
+	// result page. The kicker on the share page and the og:title both
+	// flip to the honest verb.
+	titleVerb := "spotted the " + target
+	if pp.ScorePct == 0 {
+		titleVerb = "let the " + target + " get away"
 	}
 
 	// Server-rendered card line for the page body (the shared text bubble
