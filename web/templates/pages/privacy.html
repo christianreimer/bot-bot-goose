@@ -92,9 +92,8 @@
     <section class="privacy-section">
       <h3>Third parties</h3>
       <ul>
-        <li><b>Resend</b> delivers our sign-in emails. They see your email address (they have to deliver it) and keep their own delivery logs, as their privacy policy explains. We don't use anything else from Resend.</li>
-        <li><b>Cloudflare</b> handles encryption and routes your traffic to our server. They keep standard proxy logs.</li>
-        <li><b>Anthropic</b> generates the bot answers, but only when we prepare puzzles in advance. Your data is never sent to Anthropic.</li>
+        <li><b>Resend</b> delivers our sign-in emails. They see your email address (they have to, to deliver the message) and keep their own delivery logs, as their privacy policy explains. We don't use anything else from Resend.</li>
+        <li><b>DigitalOcean</b> hosts our server and the database that holds the records described above. Their staff don't access your data day-to-day, but the data lives on their hardware, so their policies apply at the infrastructure layer.</li>
       </ul>
       <p>That's the whole list.</p>
     </section>
@@ -175,20 +174,19 @@
       <h3>Contact</h3>
       <p>
         For privacy questions, data requests, or anything else, email
-        <a class="link" href="mailto:contact@botbotgoose.fun?subject=Bot%20Bot%20Goose%20privacy%20request&body=%5BWrite%20your%20request%20here%5D%0A%0A---%0Aaccount%20id%3A%20{{ if .UserID }}{{ .UserID }}{{ else }}(not%20signed%20in%20on%20this%20device){{ end }}">contact@botbotgoose.fun</a>.
+        <a class="link" href="mailto:contact@botbotgoose.fun?subject=Bot%20Bot%20Goose%20privacy%20request">contact@botbotgoose.fun</a>.
       </p>
       {{ if .UserID }}
       <p class="muted">
-        If your email client doesn't pre-fill the body, please include the
-        line below so we can find your account quickly:<br>
-        <code>account id: {{ .UserID }}</code>
+        Please include the account ID below in your message so we can
+        find your data quickly:
       </p>
+      <p><code>{{ .UserID }}</code></p>
       {{ else }}
       <p class="muted">
-        You're reading this without an active session on this device, so
-        we can't pre-fill an account ID for you. If you're writing about
-        a specific account, please open this page on the same device you
-        played on so we can include the ID automatically.
+        You don't have an active session on this device. If you're
+        writing about a specific account, open this page on the device
+        you played on so we can show you the account ID to include.
       </p>
       {{ end }}
       <p>
