@@ -112,7 +112,7 @@ Scoring is identical across modes; the unified **Adjusted Fool Rate** (`internal
 
 ### You vs the Room (contribution loop)
 
-Players can submit human-written decoys from the result page. Submissions go to moderation as `pending`. Once approved, the composer's bandit can plant them in future puzzles. Each decoy's impressions and "thought-I-was-a-bot" counts roll up nightly into `forger_rankings`; users see their stats on `/me` and rank on `/leaderboard/forgers`.
+Players can submit human-written decoys from the result page. Submissions go to moderation as `pending`. Once approved, the composer's bandit can plant them in future puzzles. Each decoy's impressions and "thought-I-was-a-bot" counts roll up nightly into `forger_rankings`; users see their stats on `/me` and rank on `/leaderboard/originals`.
 
 Every approved decoy gets a stable shareable URL at `/d/<short>` — a "could you have caught this?" hook with the author's handle, fool rate, and tier. Result pages also share a stable URL at `/r/<short>` whose OG image is the player's grid rendered as a 1200×630 PNG.
 
@@ -160,7 +160,7 @@ Tracks the 14-step build order from the implementation plan. See [`BACKLOG.md`](
 - [x] **8. Bot-candidate generator** — `cmd/bot-candidates` with Anthropic Messages API.
 - [x] **9. `puzzle-build` cron** — idempotent composer with mode rotation + 22:00 UTC alarm. *Slot E/P/B bandit: uniform-random stub; replace per plan.*
 - [x] **10. Find-the-Human mode** — `puzzle_mode` enum, composer recipe, mode-baselined fool rate.
-- [x] **11. Forger leaderboard + decoy report share card** — `/leaderboard/forgers`, `/leaderboard/spotters`, `/d/<short>` artifact.
+- [x] **11. Originals leaderboard + decoy report share card** — `/leaderboard/originals`, `/leaderboard/spotters`, `/d/<short>` artifact.
 - [ ] **12. Adaptive difficulty** — `spotter_elo` column exists; ELO update + archetype-by-difficulty pick TODO.
 - [ ] **13. Variable target count + traps** — `target_count` column + `is_trap` flag exist; composer wiring TODO.
 - [ ] **14. Seasons + format rotation + analytics events** — `seasons` and `events` tables exist; populator TODO.

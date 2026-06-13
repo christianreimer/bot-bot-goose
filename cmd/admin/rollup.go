@@ -12,7 +12,7 @@ import (
 )
 
 // runRollup recomputes forger_rankings from decoy_daily_stats. Nightly cron
-// target; can also be run on demand to refresh the /leaderboard/forgers page.
+// target; can also be run on demand to refresh the /leaderboard/originals page.
 func runRollup(ctx context.Context, log *slog.Logger) error {
 	fs := flag.NewFlagSet("rollup", flag.ExitOnError)
 	dbURL := fs.String("db", envDefault("BBG_DB_URL", "postgres://bbg:bbg@localhost:5432/bbg?sslmode=disable"), "db url")

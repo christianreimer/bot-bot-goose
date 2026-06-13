@@ -4,7 +4,7 @@
 
 {{ define "header-meta" }}
   <a href="/" class="nav-link">← today</a>
-  <a href="/leaderboard/forgers" class="nav-link">forgers ▸</a>
+  <a href="/leaderboard/originals" class="nav-link">originals ▸</a>
 {{ end }}
 
 {{ define "content" }}
@@ -33,8 +33,8 @@
     {{ end }}
 
     {{ if .Teaser }}
-      <div class="section-h"><a href="/leaderboard/forgers" class="see-more">Today's top forger ▸</a></div>
-      <a href="/leaderboard/forgers" class="lb-row lb-teaser">
+      <div class="section-h"><a href="/leaderboard/originals" class="see-more">Today's top original ▸</a></div>
+      <a href="/leaderboard/originals" class="lb-row lb-teaser">
         <div class="lb-rank">#1</div>
         <div class="lb-who">
           <div class="lb-handle">{{ .Teaser.Handle }}</div>

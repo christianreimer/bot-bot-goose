@@ -20,7 +20,7 @@
         <a href="{{ .Href }}" class="standing-card{{ if not .Eligible }} standing-pending{{ end }}">
           <div class="standing-row">
             <span class="standing-label">
-              {{ if eq .Kind "spotter" }}SPOTTER{{ else }}FORGER{{ end }}
+              {{ if eq .Kind "spotter" }}SPOTTER{{ else }}ORIGINAL{{ end }}
               {{ if .Eligible }}
                 · <b>#{{ .Rank }} of {{ .OfTotal }}</b>{{ if .Tier }} · {{ .Tier }}{{ end }}
               {{ end }}

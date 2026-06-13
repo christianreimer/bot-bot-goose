@@ -150,7 +150,7 @@ func (s *Server) routes() {
 		r.Get("/", s.handlePlayLanding)
 
 		r.Get("/me", s.handleMe)
-		r.Get("/leaderboard/forgers", s.handleLeaderboardForgers)
+		r.Get("/leaderboard/originals", s.handleLeaderboardOriginals)
 		r.Get("/leaderboard/spotters", s.handleLeaderboardSpotters)
 
 		// Public per-decoy share page — viewable without an account; the

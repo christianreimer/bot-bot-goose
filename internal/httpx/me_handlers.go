@@ -62,7 +62,7 @@ type mePayoff struct {
 // renders the "X to go" prompt instead.
 type standingCard struct {
 	Kind     string // "spotter" or "forger" — picks the row label + link
-	Href     string // /leaderboard/spotters or /leaderboard/forgers
+	Href     string // /leaderboard/spotters or /leaderboard/originals
 	Eligible bool
 	Rank     int    // 1-based; 0 when not yet eligible
 	OfTotal  int    // population size on the board
@@ -149,7 +149,7 @@ func (s *Server) standingsFor(ctx context.Context, u *db.User, forger mePayoff) 
 	out = append(out, spotter)
 
 	// Forger — ranked on the realest track.
-	fc := standingCard{Kind: "forger", Href: "/leaderboard/forgers"}
+	fc := standingCard{Kind: "forger", Href: "/leaderboard/originals"}
 	if forger.Eligible {
 		fc.Eligible = true
 		fc.Rank = forger.Rank
@@ -270,7 +270,7 @@ func (s *Server) payoffFor(ctx context.Context, u *db.User) mePayoff {
 // Leaderboards
 // ---------------------------------------------------------------------------
 
-func (s *Server) handleLeaderboardForgers(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleLeaderboardOriginals(w http.ResponseWriter, r *http.Request) {
 	gate := int64(leaderboard.MinImpressionsEligible)
 	rows, err := s.cfg.DB.TopForgers(r.Context(), 100, gate)
 	if err != nil {
@@ -281,7 +281,7 @@ func (s *Server) handleLeaderboardForgers(w http.ResponseWriter, r *http.Request
 	var teaser map[string]any
 	top, err := s.cfg.DB.TopSpotters(r.Context(), 1, 3)
 	if err != nil {
-		s.cfg.Logger.Warn("forgers page: top-spotter teaser query failed", "err", err)
+		s.cfg.Logger.Warn("originals page: top-spotter teaser query failed", "err", err)
 	} else if len(top) > 0 {
 		teaser = map[string]any{
 			"Handle":   top[0].Handle,
@@ -289,7 +289,7 @@ func (s *Server) handleLeaderboardForgers(w http.ResponseWriter, r *http.Request
 			"Plays":    top[0].Plays,
 		}
 	}
-	s.renderHTML(w, http.StatusOK, "pages/leaderboard_forgers.html", map[string]any{
+	s.renderHTML(w, http.StatusOK, "pages/leaderboard_originals.html", map[string]any{
 		"PuzzleNumber": int32(0),
 		"Rows":         rowsForTemplate(rows),
 		"Total":        total,

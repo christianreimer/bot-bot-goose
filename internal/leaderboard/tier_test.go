@@ -9,7 +9,7 @@ func TestTierFor(t *testing.T) {
 		r    float64
 		want string
 	}{
-		{0.30, TierDecoy},
+		{0.30, TierQuiet},
 		{0.38, TierVoice},
 		{0.44, TierStandout},
 		{0.50, TierUnmistakable},
@@ -40,7 +40,7 @@ func TestAdjustedMostHumanRateConvergesToRaw(t *testing.T) {
 
 func TestVotesToNextTier(t *testing.T) {
 	// 200 votes / 1000 impressions — raw 20%, baseline 33%.
-	// Adjusted = (200 + 20*0.333) / 1020 ≈ 0.203 — Decoy.
+	// Adjusted = (200 + 20*0.333) / 1020 ≈ 0.203 — Quiet.
 	// Voice at 0.37: d ≥ 0.37*1020 - 200 - 20*0.333 ≈ 377.4 - 206.66 ≈ 170.7
 	d, next := VotesToNextTier(200, 1000)
 	if next != TierVoice {

@@ -5,11 +5,12 @@ package leaderboard
 
 import "github.com/christianreimer/bot-bot-goose/internal/game"
 
-// Tiers ladder up by how convincingly the player's decoys read as the
+// Tiers ladder up by how convincingly the player's lines read as the
 // "most human" answer in their round. Anchored at the realest baseline of
-// 1/3 — a Decoy is at-or-below chance, The Realest is the rarest top tier.
+// 1/3 — Quiet is at-or-below chance (the line reads quiet, doesn't stand
+// out yet), The Realest is the rarest top tier.
 const (
-	TierDecoy        = "Decoy"
+	TierQuiet        = "Quiet"
 	TierVoice        = "Voice"
 	TierStandout     = "Standout"
 	TierUnmistakable = "Unmistakable"
@@ -37,7 +38,7 @@ func AdjustedFoolRate(picked, impressions int64) float64 {
 
 // TierFor assigns a tier from an adjusted most-human rate. Baseline is
 // 1/3; thresholds are tuned so the distribution skews:
-// Decoy > Voice > Standout > Unmistakable > The Realest.
+// Quiet > Voice > Standout > Unmistakable > The Realest.
 func TierFor(adjusted float64) string {
 	switch {
 	case adjusted >= 0.55:
@@ -49,7 +50,7 @@ func TierFor(adjusted float64) string {
 	case adjusted >= 0.37:
 		return TierVoice
 	default:
-		return TierDecoy
+		return TierQuiet
 	}
 }
 

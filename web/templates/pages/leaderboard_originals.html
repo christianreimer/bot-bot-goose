@@ -1,6 +1,6 @@
 {{ template "base.html" . }}
 
-{{ define "title" }}Forger leaderboard{{ end }}
+{{ define "title" }}Originals leaderboard{{ end }}
 
 {{ define "header-meta" }}
   <a href="/" class="nav-link">← today</a>
@@ -11,7 +11,7 @@
   <div class="stage">
     <div class="me-header">
       <div class="page-mark">🪶</div>
-      <h2>Forger leaderboard</h2>
+      <h2>Originals leaderboard</h2>
       <div class="verdict">Best at reading human. Ranked on adjusted most-human votes.</div>
     </div>
 
@@ -30,7 +30,7 @@
       </div>
     {{ else }}
       <div class="muted empty">
-        No forgers above {{ .GateMin }} votes yet. Add a line from any result page.
+        No originals above {{ .GateMin }} votes yet. Add a line from any result page.
         Once enough players vote on it, you'll appear here.
       </div>
     {{ end }}

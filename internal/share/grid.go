@@ -128,7 +128,7 @@ func DecoyReportCard(rep DecoyReport, baseURL string) string {
 				rep.FoolRawPct, rep.FoolPicked, rep.FoolImpressions)
 		}
 		if rep.Eligible && rep.Rank > 0 {
-			main += fmt.Sprintf("\nRank #%d of %d forgers · %s", rep.Rank, rep.OfTotal, rep.Tier)
+			main += fmt.Sprintf("\nRank #%d of %d originals · %s", rep.Rank, rep.OfTotal, rep.Tier)
 		} else if rep.Tier != "" {
 			main += fmt.Sprintf("\n%s · still building rep", rep.Tier)
 		}

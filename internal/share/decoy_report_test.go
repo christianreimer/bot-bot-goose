@@ -50,7 +50,7 @@ func TestDecoyReportPayoffShowsRankWhenEligible(t *testing.T) {
 	if !strings.Contains(c, "+92 beyond chance") {
 		t.Errorf("payoff missing beyond-chance points: %q", c)
 	}
-	if !strings.Contains(c, "Rank #4 of 1208 forgers") {
+	if !strings.Contains(c, "Rank #4 of 1208 originals") {
 		t.Errorf("payoff missing rank line: %q", c)
 	}
 }
