@@ -662,6 +662,16 @@ a.puzzle-no:hover{color:var(--ink);}
 .privacy-section a.link{color:var(--honk);text-decoration:none;}
 .privacy-section a.link:hover{text-decoration:underline;}
 
+/* Account-ID copy row: keep the UUID and the copy button aligned on
+   the baseline, with a little breathing room between them. The button
+   reuses the existing .btn-share mono uppercase pill. */
+.privacy-section .copy-row{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+}
+.privacy-section .copy-row code{
+  word-break:break-all;
+}
+
 .privacy-table{margin:8px 0 12px;border-top:1px solid var(--line);}
 .privacy-table-row{
   display:flex;justify-content:space-between;align-items:baseline;gap:12px;

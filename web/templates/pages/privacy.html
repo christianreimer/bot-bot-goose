@@ -181,7 +181,10 @@
         Please include the account ID below in your message so we can
         find your data quickly:
       </p>
-      <p><code>{{ .UserID }}</code></p>
+      <p class="copy-row">
+        <code id="accountId">{{ .UserID }}</code>
+        <button type="button" id="copyAccountId" class="btn-share">copy</button>
+      </p>
       {{ else }}
       <p class="muted">
         You don't have an active session on this device. If you're
@@ -195,4 +198,42 @@
       </p>
     </section>
   </article>
+
+  {{ if .UserID }}
+  {{/* Inline copy handler — tiny, no shared script, no asset hash needed.
+       Falls back through document.execCommand if Clipboard API is absent
+       (older iOS Safari over plain HTTP, mostly). */}}
+  <script>
+  (function(){
+    var btn = document.getElementById('copyAccountId');
+    var code = document.getElementById('accountId');
+    if (!btn || !code) return;
+    var revert;
+    function flash(label){
+      btn.textContent = label;
+      clearTimeout(revert);
+      revert = setTimeout(function(){ btn.textContent = 'copy'; }, 1800);
+    }
+    btn.addEventListener('click', function(){
+      var text = (code.textContent || '').trim();
+      if (!text) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(
+          function(){ flash('copied ✓'); },
+          function(){ flash('copy failed'); }
+        );
+        return;
+      }
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); flash('copied ✓'); }
+      catch (e) { flash('copy failed'); }
+      ta.remove();
+    });
+  })();
+  </script>
+  {{ end }}
 {{ end }}
