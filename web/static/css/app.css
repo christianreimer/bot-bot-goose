@@ -128,6 +128,40 @@ header{
 .answer.you-right{border-color:var(--reed);background:rgba(111,179,106,.12);}
 .answer.you-wrong{border-color:var(--miss);background:rgba(224,96,79,.12);}
 
+/* Post-reveal "felt most human?" vote affordance. The 3 human cards become
+   tappable again; the chosen one picks up a subtle ink border + tint. The
+   bot card never gets .votable, so the visual hierarchy stays: GOOSE first,
+   YOU-RIGHT/YOU-WRONG second, vote third. */
+.answer.votable{cursor:pointer;}
+.answer.votable:hover{border-color:rgba(244,162,59,.32);background:var(--surface-2);}
+.answer.voted{border-color:var(--honk);background:rgba(244,162,59,.10);}
+/* Vote prompt is the second beat of the round: the player just learned the
+   bot, now they get to weigh in on who read most human. It needs to read as
+   a fresh ask, not a footnote. Display type, honk accent, top rule to mark
+   the phase change. */
+.vote-hint{
+  font-family:var(--display);font-weight:700;font-size:18px;letter-spacing:-.01em;
+  color:var(--ink);text-align:center;
+  padding:14px 8px 10px;margin-top:6px;
+  border-top:1px solid var(--line);
+  position:relative;
+  animation:voteHintFade .35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.vote-hint::before{
+  content:"▲ now you pick";
+  display:block;
+  font-family:var(--mono);font-weight:700;font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--honk);
+  margin-bottom:6px;
+}
+@keyframes voteHintFade{
+  from{opacity:0;transform:translateY(4px);}
+  to{opacity:1;transform:none;}
+}
+@media (prefers-reduced-motion: reduce){
+  .vote-hint{animation:none;}
+}
+
 .tag{
   position:absolute;top:-9px;right:12px;
   font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.1em;
@@ -136,6 +170,7 @@ header{
 .tag.goose{background:var(--honk);color:#241400;}
 .tag.right{background:var(--reed);color:#0c1b0b;}
 .tag.wrong{background:var(--miss);color:#2a0c08;}
+.tag.human{background:var(--ink);color:#241400;}
 
 .honk-pop{
   position:absolute;top:-22px;left:50%;transform:translateX(-50%);
@@ -243,7 +278,7 @@ footer small{color:var(--muted);font-family:var(--mono);font-size:11px;}
 
 /* ---------- /me + leaderboards ---------- */
 .me-stage{align-items:stretch;}
-.me-header{text-align:center;margin:18px 0 8px;}
+.me-header{text-align:center;margin:18px 0 24px;}
 .me-header-tight{margin:14px 0 14px;}
 .me-header-tight .page-mark{font-size:32px;margin-bottom:6px;}
 .me-header-tight .verdict{font-size:13px;}

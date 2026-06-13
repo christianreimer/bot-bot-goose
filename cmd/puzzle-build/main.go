@@ -4,9 +4,9 @@
 // The 12:00 UTC cron points at this; the 22:00 UTC alarm cron points at
 // `bbg-puzzle-build --check`.
 //
-// The actual composition (mode rotation, pickers, round shape) lives in
-// internal/puzzle so both this cron and `bbg-admin puzzle compose|schedule`
-// produce identical puzzles.
+// The actual composition (pickers, round shape) lives in internal/puzzle
+// so both this cron and `bbg-admin puzzle compose|schedule` produce
+// identical puzzles. Every round is 1 bot + 3 decoys.
 package main
 
 import (
@@ -24,7 +24,6 @@ import (
 func main() {
 	fs := flag.NewFlagSet("puzzle-build", flag.ExitOnError)
 	dateStr := fs.String("date", "", "puzzle date in YYYY-MM-DD, defaults to tomorrow UTC")
-	modeFlag := fs.String("mode", "", "force mode: find_the_bot | find_the_human (default rotates)")
 	dbURL := fs.String("db", envDefault("BBG_DB_URL", "postgres://bbg:bbg@localhost:5432/bbg?sslmode=disable"), "db url")
 	check := fs.Bool("check", false, "alarm mode: exit 1 if today+1 puzzle is missing")
 	_ = fs.Parse(os.Args[1:])
@@ -53,7 +52,7 @@ func main() {
 		}
 		date = t
 	}
-	if err := runBuild(ctx, d, log, date, db.Mode(*modeFlag)); err != nil {
+	if err := runBuild(ctx, d, log, date); err != nil {
 		log.Error("build", "err", err)
 		os.Exit(1)
 	}
@@ -72,19 +71,14 @@ func envDefault(k, def string) string {
 }
 
 // runBuild composes the puzzle for `date`. Idempotent on puzzle_number.
-func runBuild(ctx context.Context, d *db.DB, log *slog.Logger, date time.Time, forcedMode db.Mode) error {
-	mode := forcedMode
-	if mode == "" {
-		mode = puzzle.PickMode(date)
-	}
-
+func runBuild(ctx context.Context, d *db.DB, log *slog.Logger, date time.Time) error {
 	n, err := d.NextPuzzleNumber(ctx)
 	if err != nil {
 		return err
 	}
-	log.Info("building puzzle", "n", n, "date", date.Format(time.DateOnly), "mode", mode)
+	log.Info("building puzzle", "n", n, "date", date.Format(time.DateOnly))
 
-	puzzleID, err := d.InsertDailyPuzzle(ctx, n, date, mode, nil)
+	puzzleID, err := d.InsertDailyPuzzle(ctx, n, date, nil)
 	if err != nil {
 		return err
 	}
@@ -98,15 +92,11 @@ func runBuild(ctx context.Context, d *db.DB, log *slog.Logger, date time.Time, f
 	}
 
 	for i, promptID := range prompts {
-		targetKind := "bot"
-		if mode == db.ModeFindHuman {
-			targetKind = "human"
-		}
-		roundID, err := d.InsertPuzzleRound(ctx, puzzleID, int16(i), promptID, targetKind, 1)
+		roundID, err := d.InsertPuzzleRound(ctx, puzzleID, int16(i), promptID, 1)
 		if err != nil {
 			return err
 		}
-		answers, err := puzzle.ComposeRoundAnswers(ctx, d, promptID, mode)
+		answers, err := puzzle.ComposeRoundAnswers(ctx, d, promptID)
 		if err != nil {
 			return fmt.Errorf("compose round %d: %w", i, err)
 		}

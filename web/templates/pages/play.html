@@ -19,29 +19,13 @@
     <div class="intro-scrim" id="introScrim" aria-hidden="true"></div>
     <div class="intro-card" role="document">
       <div class="intro-mark" aria-hidden="true">🪿</div>
-      {{ if eq .Mode "find_the_human" }}
-        <h2 id="introTitle" class="intro-title">Find the human</h2>
-        <p class="intro-body">
-          Each prompt gets four answers. Three are AI. One is a real person. Tap them.
-        </p>
-        <p class="intro-body">
-          After three rounds: your Human-Dar, and a grid built to travel.
-        </p>
-        <p class="intro-aside">
-          Most days it's the reverse. Watch the label above the prompt.
-        </p>
-      {{ else }}
-        <h2 id="introTitle" class="intro-title">How to play</h2>
-        <p class="intro-body">
-          Four answers to one prompt. Three came from real people. One is an AI trying to pass. That one's the goose. Find it.
-        </p>
-        <p class="intro-body">
-          Three rounds, then your Bot-Dar score and a grid worth sharing.
-        </p>
-        <p class="intro-aside">
-          Some days it flips: three bots, one human, and you're hunting the person. The label above each prompt tells you which.
-        </p>
-      {{ end }}
+      <h2 id="introTitle" class="intro-title">How to play</h2>
+      <p class="intro-body">
+        Four answers to one prompt. Three came from real people. One is a bot trying to hide. That one's the goose. Find it.
+      </p>
+      <p class="intro-body">
+        Three rounds, then your Bot-Dar score and a grid worth sharing.
+      </p>
       <div class="controls">
         <button type="button" class="btn btn-primary" id="introDismiss">Got it ▸</button>
       </div>

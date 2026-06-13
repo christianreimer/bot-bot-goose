@@ -42,7 +42,6 @@ var (
 type ResultOG struct {
 	PuzzleNumber int32
 	Outcomes     []game.Outcome
-	Mode         game.Mode
 	Streak       int
 }
 
@@ -86,11 +85,11 @@ func RenderResultOG(r ResultOG) ([]byte, error) {
 	}
 	defer face14.Close()
 
-	// Header — 🪿/🧍 ASCII fallback (no color-emoji font server-side), brand wordmark, puzzle number.
+	// Header — brand wordmark + puzzle number. The 🪿 emoji can't be
+	// rendered server-side (no color-emoji font available), so the brand
+	// line is text-only here; the in-app wordmark carries the goose.
 	brand := "Bot Bot Goose"
 	drawString(img, face24, brand, cardX+36, cardY+58, colorInk)
-	// "Daily Goose" is the brand line and stays constant across modes.
-	// The Mode inversion is carried by the stat label below the grid.
 	subtitle := fmt.Sprintf("Daily Goose #%03d", r.PuzzleNumber)
 	drawString(img, face14, subtitle, cardX+36, cardY+86, colorMuted)
 
@@ -110,16 +109,10 @@ func RenderResultOG(r ResultOG) ([]byte, error) {
 	// percentage drops to muted (no honk celebration of a 0%) and the
 	// leading verb shifts from "Bot-Dar X%" to "Goose got away".
 	pct := game.ScorePct(r.Outcomes)
-	statLabel := "Bot-Dar"
-	target := "Goose"
-	if r.Mode == game.FindTheHuman {
-		statLabel = "Human-Dar"
-		target = "Human"
-	}
-	scoreLine := fmt.Sprintf("%s %d%%", statLabel, pct)
+	scoreLine := fmt.Sprintf("Bot-Dar %d%%", pct)
 	scoreColor := colorHonk
 	if pct == 0 {
-		scoreLine = fmt.Sprintf("%s got away · %s 0%%", target, statLabel)
+		scoreLine = "Goose got away · Bot-Dar 0%"
 		scoreColor = colorMuted
 	}
 	drawString(img, face48, scoreLine, cardX+36, cardY+cardH-44, scoreColor)
@@ -231,7 +224,7 @@ func RenderHarvestOG() ([]byte, error) {
 
 	// Sub — the campaign tagline, two lines.
 	drawString(img, face28, "Type like a person.", 320, 348, colorMuted)
-	drawString(img, face28, "Your answers become future traps.", 320, 392, colorMuted)
+	drawString(img, face28, "Your answers go into future rounds.", 320, 392, colorMuted)
 
 	// Footer line, brand-anchored.
 	drawString(img, face18, "botbotgoose.fun/harvest", 320, OGHeight-58, colorHonk)

@@ -10,21 +10,24 @@ func TestDecoyReportPendingVariant(t *testing.T) {
 	if !strings.Contains(c, "Planted") {
 		t.Errorf("pending card missing planted copy: %q", c)
 	}
-	if strings.Contains(c, "fool rate") || strings.Contains(c, "%") {
+	if strings.Contains(c, "most human") || strings.Contains(c, "%") {
 		t.Errorf("pending card must NOT show stats: %q", c)
 	}
 }
 
 func TestDecoyReportLiveAwaiting(t *testing.T) {
-	c := DecoyReportCard(DecoyReport{Text: "a thing", Status: "approved", Impressions: 0}, "botbotgoose.fun")
-	if !strings.Contains(c, "first impressions") {
+	c := DecoyReportCard(DecoyReport{Text: "a thing", Status: "approved", RealestImpressions: 0}, "botbotgoose.fun")
+	if !strings.Contains(c, "first votes") {
 		t.Errorf("zero-impression card missing copy: %q", c)
 	}
 }
 
 func TestDecoyReportFlopReframesWarmly(t *testing.T) {
-	c := DecoyReportCard(DecoyReport{Text: "a thing", Status: "approved", RawPct: 9, Impressions: 312, Fooled: 28}, "botbotgoose.fun")
-	if !strings.Contains(c, "Too human") {
+	c := DecoyReportCard(DecoyReport{
+		Text: "a thing", Status: "approved",
+		RealestRawPct: 12, RealestImpressions: 312, RealestVotes: 37,
+	}, "botbotgoose.fun")
+	if !strings.Contains(c, "Reads quiet") {
 		t.Errorf("flop must reframe warmly: %q", c)
 	}
 	if !strings.Contains(c, "🧑") {
@@ -35,20 +38,31 @@ func TestDecoyReportFlopReframesWarmly(t *testing.T) {
 func TestDecoyReportPayoffShowsRankWhenEligible(t *testing.T) {
 	c := DecoyReportCard(DecoyReport{
 		Text: "a thing", Status: "approved",
-		RawPct: 47, Impressions: 660, Fooled: 312, BeyondChance: 247,
-		Eligible: true, Rank: 4, OfTotal: 1208, Tier: "Forger",
+		RealestRawPct: 47, RealestImpressions: 660, RealestVotes: 312, RealestBeyond: 92,
+		Eligible: true, Rank: 4, OfTotal: 1208, Tier: "Standout",
 	}, "botbotgoose.fun")
 	if !strings.Contains(c, "47%") {
 		t.Errorf("payoff missing raw pct: %q", c)
 	}
-	if !strings.Contains(c, "312 fooled") {
-		t.Errorf("payoff missing fooled count: %q", c)
+	if !strings.Contains(c, "312 votes") {
+		t.Errorf("payoff missing vote count: %q", c)
 	}
-	if !strings.Contains(c, "+247 beyond chance") {
-		t.Errorf("payoff missing forger points: %q", c)
+	if !strings.Contains(c, "+92 beyond chance") {
+		t.Errorf("payoff missing beyond-chance points: %q", c)
 	}
 	if !strings.Contains(c, "Rank #4 of 1208 forgers") {
 		t.Errorf("payoff missing rank line: %q", c)
+	}
+}
+
+func TestDecoyReportPayoffIncludesFoolFlavorWhenPresent(t *testing.T) {
+	c := DecoyReportCard(DecoyReport{
+		Text: "a thing", Status: "approved",
+		RealestRawPct: 41, RealestImpressions: 200, RealestVotes: 82, RealestBeyond: 16,
+		FoolImpressions: 200, FoolPicked: 50, FoolRawPct: 25,
+	}, "botbotgoose.fun")
+	if !strings.Contains(c, "Also fooled 25%") {
+		t.Errorf("payoff missing fool flavor line: %q", c)
 	}
 }
 

@@ -336,22 +336,13 @@ func harvestBulkReview(ctx context.Context, log *slog.Logger) error {
 func harvestPrompts(ctx context.Context, log *slog.Logger) error {
 	fs := flag.NewFlagSet("harvest prompts", flag.ExitOnError)
 	dbf := registerDBFlags(fs)
-	mode := fs.String("mode", "", "find_the_bot|find_the_human — when set, prints a `need` column (4 or 2) and a `gap` (target − approved_decoys)")
 	asTable := fs.Bool("table", false, "human-readable table instead of JSON")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
 	}
-	target := 0
-	switch *mode {
-	case "":
-		// no target column
-	case "find_the_bot":
-		target = 4
-	case "find_the_human":
-		target = 2
-	default:
-		return emitError("invalid", "--mode must be find_the_bot|find_the_human", nil)
-	}
+	// Single-mode: every prompt needs 4 approved decoys (3 per round + a
+	// spare in the pool). Gap = how many more decoys would need approval.
+	const target = 4
 	d, err := openDB(ctx, dbf, log)
 	if err != nil {
 		return err
@@ -362,48 +353,37 @@ func harvestPrompts(ctx context.Context, log *slog.Logger) error {
 		return emitError("db", err.Error(), nil)
 	}
 	if *asTable {
-		headers := []string{"PROMPT_ID", "PROMPT", "PENDING", "INGESTED", "REJECTED", "APPROVED_DECOYS"}
-		if target > 0 {
-			headers = append(headers, "GAP")
-		}
+		headers := []string{"PROMPT_ID", "PROMPT", "PENDING", "INGESTED", "REJECTED", "APPROVED_DECOYS", "GAP"}
 		rows := make([][]any, 0, len(rollups))
 		for _, r := range rollups {
-			row := []any{
+			gap := target - r.ApprovedDec
+			if gap < 0 {
+				gap = 0
+			}
+			rows = append(rows, []any{
 				r.PromptID.String()[:8],
 				truncate(r.PromptText, 40),
-				r.Pending, r.Ingested, r.Rejected, r.ApprovedDec,
-			}
-			if target > 0 {
-				gap := target - r.ApprovedDec
-				if gap < 0 {
-					gap = 0
-				}
-				row = append(row, gap)
-			}
-			rows = append(rows, row)
+				r.Pending, r.Ingested, r.Rejected, r.ApprovedDec, gap,
+			})
 		}
 		return emitTable(headers, rows)
 	}
 	out := make([]map[string]any, 0, len(rollups))
 	for _, r := range rollups {
-		entry := map[string]any{
+		gap := target - r.ApprovedDec
+		if gap < 0 {
+			gap = 0
+		}
+		out = append(out, map[string]any{
 			"prompt_id":       r.PromptID.String(),
 			"prompt_text":     r.PromptText,
 			"pending":         r.Pending,
 			"ingested":        r.Ingested,
 			"rejected":        r.Rejected,
 			"approved_decoys": r.ApprovedDec,
-		}
-		if target > 0 {
-			gap := target - r.ApprovedDec
-			if gap < 0 {
-				gap = 0
-			}
-			entry["mode"] = *mode
-			entry["target"] = target
-			entry["gap"] = gap
-		}
-		out = append(out, entry)
+			"target":          target,
+			"gap":             gap,
+		})
 	}
 	return emitJSON(out)
 }

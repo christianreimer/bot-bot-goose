@@ -7,45 +7,52 @@ import (
 	"net/http"
 
 	"github.com/christianreimer/bot-bot-goose/internal/db"
-	"github.com/christianreimer/bot-bot-goose/internal/game"
 	"github.com/christianreimer/bot-bot-goose/internal/leaderboard"
 	"github.com/christianreimer/bot-bot-goose/internal/share"
 	"github.com/christianreimer/bot-bot-goose/internal/users"
 )
 
-// meDecoyView is a per-decoy row for the /me template. It carries both the
-// raw rate (with the right baseline drawn on the chart) and the adjusted
-// rate so the user sees the friendly number AND understands the ranking.
+// meDecoyView is a per-decoy row for the /me template. The realest fields
+// drive the primary stat ("X% most human"); fool fields stay as flavor
+// ("X picked you as the bot").
 type meDecoyView struct {
 	PromptText   string
 	Text         string
 	Status       string
-	TotalImp     int64
-	TotalPicked  int64
-	RawPct       int    // raw fool rate as a percentage
-	AdjustedPct  int    // adjusted, for tier math
-	BaselinePct  int    // mode-weighted baseline shown alongside
-	BeyondChance int    // forger points: max(0, picked - baseline*imp)
-	ModeMix      string // "mostly find_the_bot" etc, for the right copy
-	ShareCard    string // pre-built decoy-report share text
+	// Realest (primary) — votes / impressions on the post-reveal vote.
+	RealestImp        int64
+	RealestVotes      int64
+	RealestRawPct     int
+	RealestAdjPct     int
+	RealestBaselinePct int  // chance-line for the realest vote (33%)
+	RealestBeyond     int   // votes earned above chance
+	// Fool (flavor) — kept for the "X of N called you a bot" line.
+	FoolImp     int64
+	FoolPicked  int64
+	FoolRawPct  int
+	ShareCard   string
 }
 
-// mePayoff is the §4 "312 people just accused you of being a bot" block.
-// Still consumed by decoyViewWithShare to build per-decoy share cards
-// (so all surfaces tell the same tier/rank story).
+// mePayoff is the §4 forger payoff block. Switched to realest math: the
+// ranked metric is "most human" voting; fool rate stays as display flavor.
 type mePayoff struct {
-	Visible          bool   // hide entirely until any impressions exist
-	Eligible         bool   // false = under the leaderboard impressions gate
-	TotalImpressions int64
-	TotalPicked      int64
-	AdjustedPct      int
-	BeyondChance     int
-	Tier             string
-	Rank             int
-	OfTotal          int
-	NextTier         string
-	FoolsToNext      int
-	GateMin          int64
+	Visible      bool // hide entirely until any realest impressions exist
+	Eligible     bool // false = under the realest impressions gate
+	// Realest (the ranked track).
+	RealestImpressions int64
+	RealestVotes       int64
+	RealestAdjPct      int
+	RealestBeyond      int
+	Tier               string
+	Rank               int
+	OfTotal            int
+	NextTier           string
+	VotesToNext        int
+	// Fool (flavor).
+	FoolImpressions int64
+	FoolPicked      int64
+	FoolAdjPct      int
+	GateMin         int64
 }
 
 // standingCard is one row in the "Standings" block at the top of /me.
@@ -141,26 +148,26 @@ func (s *Server) standingsFor(ctx context.Context, u *db.User, forger mePayoff) 
 	}
 	out = append(out, spotter)
 
-	// Forger
+	// Forger — ranked on the realest track.
 	fc := standingCard{Kind: "forger", Href: "/leaderboard/forgers"}
 	if forger.Eligible {
 		fc.Eligible = true
 		fc.Rank = forger.Rank
 		fc.OfTotal = forger.OfTotal
 		fc.Tier = forger.Tier
-		fc.Stat = fmt.Sprintf("%d%%", forger.AdjustedPct)
+		fc.Stat = fmt.Sprintf("%d%%", forger.RealestAdjPct)
 		if forger.NextTier != "" {
-			fc.Note = fmt.Sprintf("+%d beyond chance. %d fool%s to %s.",
-				forger.BeyondChance, forger.FoolsToNext, plural(forger.FoolsToNext), forger.NextTier)
+			fc.Note = fmt.Sprintf("+%d beyond chance. %d vote%s to %s.",
+				forger.RealestBeyond, forger.VotesToNext, plural(forger.VotesToNext), forger.NextTier)
 		} else {
-			fc.Note = fmt.Sprintf("+%d beyond chance. Top of the pond.", forger.BeyondChance)
+			fc.Note = fmt.Sprintf("+%d beyond chance. Top of the pond.", forger.RealestBeyond)
 		}
 	} else if forger.Visible {
-		need := forger.GateMin - forger.TotalImpressions
+		need := forger.GateMin - forger.RealestImpressions
 		if need < 1 {
 			need = 1
 		}
-		fc.Note = fmt.Sprintf("%d more impression%s to rank.", need, plural(int(need)))
+		fc.Note = fmt.Sprintf("%d more vote%s to rank.", need, plural(int(need)))
 	} else {
 		fc.Note = "Plant a decoy from any result page to start."
 	}
@@ -177,60 +184,55 @@ func plural(n int) string {
 }
 
 func decoyViewWithShare(d db.UserDecoy, payoff mePayoff, baseURL, shareURL string) meDecoyView {
-	totalImp := d.BotImp + d.HumanImp
-	totalPicked := d.BotPicked + d.HumanPicked
+	realestImp := d.RealestImpressions
+	realestVotes := d.RealestVotes
+	foolImp := d.Impressions
+	foolPicked := d.PickedAsBot
 
-	// Per-decoy "primary mode" — pick the baseline the user expects on
-	// their chart. We don't try to be clever about mixed-mode decoys; the
-	// raw % is what's shown, the line is just for context.
-	mode := game.FindTheBot
-	mixCopy := "mostly Find the Bot"
-	if d.HumanImp > d.BotImp {
-		mode = game.FindTheHuman
-		mixCopy = "mostly Find the Human"
+	realestRaw := 0
+	if realestImp > 0 {
+		realestRaw = int(math.Round(100 * float64(realestVotes) / float64(realestImp)))
 	}
-	if d.HumanImp > 0 && d.BotImp > 0 {
-		mixCopy = "mixed modes"
-	}
-	if totalImp == 0 {
-		mixCopy = "awaiting first impressions"
+	foolRaw := 0
+	if foolImp > 0 {
+		foolRaw = int(math.Round(100 * float64(foolPicked) / float64(foolImp)))
 	}
 
-	rawPct := 0
-	if totalImp > 0 {
-		rawPct = int(math.Round(100 * float64(totalPicked) / float64(totalImp)))
-	}
-	adj := game.AdjustedFoolRate(int(totalPicked), int(totalImp), mode)
-	beyond := game.ForgerPoints(int(totalPicked), int(totalImp), mode)
-	baselinePct := int(math.Round(100 * game.BaselineFor(mode)))
+	realestAdj := leaderboard.AdjustedMostHumanRate(realestVotes, realestImp)
+	realestBeyond := leaderboard.RealestBeyondChance(realestVotes, realestImp)
 
 	report := share.DecoyReport{
-		Text:         d.Text,
-		RawPct:       rawPct,
-		Impressions:  totalImp,
-		Fooled:       totalPicked,
-		BeyondChance: beyond,
-		Eligible:     payoff.Eligible,
-		Rank:         payoff.Rank,
-		OfTotal:      payoff.OfTotal,
-		Tier:         payoff.Tier,
-		Status:       d.Status,
-		ShareURL:     shareURL,
+		Text:               d.Text,
+		RealestRawPct:      realestRaw,
+		RealestImpressions: realestImp,
+		RealestVotes:       realestVotes,
+		RealestBeyond:      realestBeyond,
+		FoolImpressions:    foolImp,
+		FoolPicked:         foolPicked,
+		FoolRawPct:         foolRaw,
+		Eligible:           payoff.Eligible,
+		Rank:               payoff.Rank,
+		OfTotal:            payoff.OfTotal,
+		Tier:               payoff.Tier,
+		Status:             d.Status,
+		ShareURL:           shareURL,
 	}
 	card := share.DecoyReportCard(report, baseURL)
 
 	return meDecoyView{
-		PromptText:   d.PromptText,
-		Text:         d.Text,
-		Status:       d.Status,
-		TotalImp:     totalImp,
-		TotalPicked:  totalPicked,
-		RawPct:       rawPct,
-		AdjustedPct:  int(math.Round(100 * adj)),
-		BaselinePct:  baselinePct,
-		BeyondChance: beyond,
-		ModeMix:      mixCopy,
-		ShareCard:    card,
+		PromptText:         d.PromptText,
+		Text:               d.Text,
+		Status:             d.Status,
+		RealestImp:         realestImp,
+		RealestVotes:       realestVotes,
+		RealestRawPct:      realestRaw,
+		RealestAdjPct:      int(math.Round(100 * realestAdj)),
+		RealestBaselinePct: int(math.Round(100 * leaderboard.RealestBaseline)),
+		RealestBeyond:      realestBeyond,
+		FoolImp:            foolImp,
+		FoolPicked:         foolPicked,
+		FoolRawPct:         foolRaw,
+		ShareCard:          card,
 	}
 }
 
@@ -243,34 +245,24 @@ func (s *Server) payoffFor(ctx context.Context, u *db.User) mePayoff {
 	}
 	total, _ := s.cfg.DB.EligibleForgerCount(ctx, gate)
 
-	d, _ := s.cfg.DB.UserDecoys(ctx, u.ID)
-	var botImp, botPicked, humanImp, humanPicked int64
-	for _, x := range d {
-		botImp += x.BotImp
-		botPicked += x.BotPicked
-		humanImp += x.HumanImp
-		humanPicked += x.HumanPicked
-	}
-	foolsToNext, nextTier := leaderboard.FoolsToNextTier(botPicked, botImp, humanPicked, humanImp)
-
-	beyond := int(float64(botPicked+humanPicked) - leaderboard.WeightedBaseline(botImp, humanImp)*float64(botImp+humanImp) + 0.5)
-	if beyond < 0 {
-		beyond = 0
-	}
+	votesToNext, nextTier := leaderboard.VotesToNextTier(rank.RealestTotalVotes, rank.RealestTotalImpressions)
 
 	return mePayoff{
-		Visible:          true,
-		Eligible:         rank.Rank > 0,
-		TotalImpressions: rank.TotalImpressions,
-		TotalPicked:      rank.TotalPickedAsBot,
-		AdjustedPct:      int(math.Round(100 * rank.AdjustedFoolRate)),
-		BeyondChance:     beyond,
-		Tier:             rank.Tier,
-		Rank:             rank.Rank,
-		OfTotal:          total,
-		NextTier:         nextTier,
-		FoolsToNext:      foolsToNext,
-		GateMin:          gate,
+		Visible:            true,
+		Eligible:           rank.Rank > 0,
+		RealestImpressions: rank.RealestTotalImpressions,
+		RealestVotes:       rank.RealestTotalVotes,
+		RealestAdjPct:      int(math.Round(100 * rank.AdjustedRealestRate)),
+		RealestBeyond:      rank.RealestBeyondChance,
+		Tier:               rank.Tier,
+		Rank:               rank.Rank,
+		OfTotal:            total,
+		NextTier:           nextTier,
+		VotesToNext:        votesToNext,
+		FoolImpressions:    rank.TotalImpressions,
+		FoolPicked:         rank.TotalPickedAsBot,
+		FoolAdjPct:         int(math.Round(100 * rank.AdjustedFoolRate)),
+		GateMin:            gate,
 	}
 }
 
@@ -310,22 +302,28 @@ func (s *Server) handleLeaderboardForgers(w http.ResponseWriter, r *http.Request
 type forgerRowView struct {
 	Rank             int
 	Handle           string
-	AdjustedPct      int
+	RealestPct       int    // primary stat — adjusted most-human rate
 	Tier             string
-	TotalImpressions int64
-	TotalPickedAsBot int64
+	RealestVotes     int64
+	RealestImps      int64
+	FoolPct          int    // flavor — adjusted fool rate
+	FoolPicked       int64
+	FoolImps         int64
 }
 
 func rowsForTemplate(rows []db.ForgerLeaderboardRow) []forgerRowView {
 	out := make([]forgerRowView, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, forgerRowView{
-			Rank:             r.Rank,
-			Handle:           r.Handle,
-			AdjustedPct:      int(math.Round(100 * r.AdjustedFoolRate)),
-			Tier:             r.Tier,
-			TotalImpressions: r.TotalImpressions,
-			TotalPickedAsBot: r.TotalPickedAsBot,
+			Rank:         r.Rank,
+			Handle:       r.Handle,
+			RealestPct:   int(math.Round(100 * r.AdjustedRealestRate)),
+			Tier:         r.Tier,
+			RealestVotes: r.RealestTotalVotes,
+			RealestImps:  r.RealestTotalImpressions,
+			FoolPct:      int(math.Round(100 * r.AdjustedFoolRate)),
+			FoolPicked:   r.TotalPickedAsBot,
+			FoolImps:     r.TotalImpressions,
 		})
 	}
 	return out
@@ -353,9 +351,9 @@ func (s *Server) handleLeaderboardSpotters(w http.ResponseWriter, r *http.Reques
 		s.cfg.Logger.Warn("spotters page: top-forger teaser query failed", "err", err)
 	} else if len(top) > 0 {
 		teaser = map[string]any{
-			"Handle":      top[0].Handle,
-			"Tier":        top[0].Tier,
-			"AdjustedPct": int(math.Round(100 * top[0].AdjustedFoolRate)),
+			"Handle":     top[0].Handle,
+			"Tier":       top[0].Tier,
+			"RealestPct": int(math.Round(100 * top[0].AdjustedRealestRate)),
 		}
 	}
 	s.renderHTML(w, http.StatusOK, "pages/leaderboard_spotters.html", map[string]any{

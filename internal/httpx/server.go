@@ -185,6 +185,7 @@ func (s *Server) routes() {
 			r.Post("/play/start", s.handleAPIPlayStart)
 			r.Post("/play/round/{n}/hint", s.handleAPIHint)
 			r.Post("/play/round/{n}/guess", s.handleAPIGuess)
+			r.Post("/play/round/{n}/realest", s.handleAPIRealest)
 			r.Post("/decoy/submit", s.handleAPIDecoySubmit)
 			r.Patch("/me/handle", s.handlePatchHandle)
 		})

@@ -83,8 +83,8 @@ func runSeed(ctx context.Context, log *slog.Logger) error {
 	}
 	log.Info("seeded archetypes", "n", len(arche))
 
-	// 2. Puzzle #001 — prototype content, find_the_bot mode.
-	puzzleID, err := d.InsertDailyPuzzle(ctx, 1, time.Now().UTC().Truncate(24*time.Hour), db.ModeFindBot, nil)
+	// 2. Puzzle #001 — prototype content.
+	puzzleID, err := d.InsertDailyPuzzle(ctx, 1, time.Now().UTC().Truncate(24*time.Hour), nil)
 	if err != nil {
 		return fmt.Errorf("insert puzzle: %w", err)
 	}
@@ -94,7 +94,7 @@ func runSeed(ctx context.Context, log *slog.Logger) error {
 		if err != nil {
 			return fmt.Errorf("prompt: %w", err)
 		}
-		roundID, err := d.InsertPuzzleRound(ctx, puzzleID, int16(idx), promptID, "bot", 1)
+		roundID, err := d.InsertPuzzleRound(ctx, puzzleID, int16(idx), promptID, 1)
 		if err != nil {
 			return fmt.Errorf("round: %w", err)
 		}

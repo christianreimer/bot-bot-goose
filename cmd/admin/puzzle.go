@@ -59,7 +59,7 @@ func puzzleUsage() {
   show       Show one puzzle with rounds + answers.
   create     Create an empty puzzle slot for a date (no rounds).
   compose    Compose a full puzzle (3 rounds, 4 answers each) for a date.
-  edit       Edit mutable fields (--mode, --theme, --date) on unplayed puzzles.
+  edit       Edit mutable fields (--theme, --date) on unplayed puzzles.
   set-round  Set or replace one round's prompt + re-pick its answers.
   set-answer Override one answer's text snapshot (slot 0..3).
   delete     Delete an unplayed puzzle.
@@ -131,20 +131,18 @@ func puzzleList(ctx context.Context, log *slog.Logger) error {
 			rows = append(rows, []any{
 				r.PuzzleNumber,
 				r.PuzzleDate.Format("2006-01-02"),
-				r.Mode,
 				derefOr(r.Theme, "-"),
 				r.Plays,
 				truncate(orDash(r.FirstRound), 50),
 			})
 		}
-		return emitTable([]string{"NUMBER", "DATE", "MODE", "THEME", "PLAYS", "PROMPT0"}, rows)
+		return emitTable([]string{"NUMBER", "DATE", "THEME", "PLAYS", "PROMPT0"}, rows)
 	}
 	out := make([]map[string]any, 0, len(enriched))
 	for _, r := range enriched {
 		row := map[string]any{
 			"puzzle_number": r.PuzzleNumber,
 			"puzzle_date":   r.PuzzleDate.Format("2006-01-02"),
-			"mode":          string(r.Mode),
 			"frozen_at":     r.FrozenAt.UTC().Format(time.RFC3339),
 			"theme":         r.Theme,
 			"plays":         r.Plays,
@@ -199,7 +197,6 @@ func puzzleShow(ctx context.Context, log *slog.Logger) error {
 		RoundIndex  int          `json:"round_index"`
 		PromptID    string       `json:"prompt_id"`
 		PromptText  string       `json:"prompt_text"`
-		TargetKind  string       `json:"target_kind"`
 		TargetCount int          `json:"target_count"`
 		Answers     []answerJSON `json:"answers"`
 	}
@@ -226,17 +223,16 @@ func puzzleShow(ctx context.Context, log *slog.Logger) error {
 			RoundIndex:  int(r.RoundIndex),
 			PromptID:    r.PromptID.String(),
 			PromptText:  r.PromptText,
-			TargetKind:  r.TargetKind,
 			TargetCount: int(r.TargetCount),
 			Answers:     ajson,
 		})
 	}
 
 	if *asTable {
-		fmt.Fprintf(os.Stdout, "Puzzle #%d  %s  mode=%s  theme=%s  has_plays=%v\n\n",
-			p.PuzzleNumber, p.PuzzleDate.Format("2006-01-02"), p.Mode, derefOr(p.Theme, "-"), hasPlays)
+		fmt.Fprintf(os.Stdout, "Puzzle #%d  %s  theme=%s  has_plays=%v\n\n",
+			p.PuzzleNumber, p.PuzzleDate.Format("2006-01-02"), derefOr(p.Theme, "-"), hasPlays)
 		for _, r := range roundsOut {
-			fmt.Fprintf(os.Stdout, "Round %d  [%s]  %s\n", r.RoundIndex, r.TargetKind, r.PromptText)
+			fmt.Fprintf(os.Stdout, "Round %d  %s\n", r.RoundIndex, r.PromptText)
 			rows := make([][]any, 0, len(r.Answers))
 			for _, a := range r.Answers {
 				rows = append(rows, []any{a.Slot, a.ContentKind, truncate(a.AnswerText, 80)})
@@ -251,7 +247,6 @@ func puzzleShow(ctx context.Context, log *slog.Logger) error {
 	return emitJSON(map[string]any{
 		"puzzle_number": p.PuzzleNumber,
 		"puzzle_date":   p.PuzzleDate.Format("2006-01-02"),
-		"mode":          string(p.Mode),
 		"frozen_at":     p.FrozenAt.UTC().Format(time.RFC3339),
 		"theme":         p.Theme,
 		"has_plays":     hasPlays,
@@ -265,7 +260,6 @@ func puzzleCreate(ctx context.Context, log *slog.Logger) error {
 	fs := flag.NewFlagSet("puzzle create", flag.ExitOnError)
 	dbf := registerDBFlags(fs)
 	dateStr := fs.String("date", "", "YYYY-MM-DD (required)")
-	modeStr := fs.String("mode", "find_the_bot", "find_the_bot | find_the_human")
 	theme := fs.String("theme", "", "optional theme tag")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
@@ -301,7 +295,7 @@ func puzzleCreate(ctx context.Context, log *slog.Logger) error {
 	if *theme != "" {
 		themePtr = theme
 	}
-	id, err := d.InsertDailyPuzzle(ctx, n, date, db.Mode(*modeStr), themePtr)
+	id, err := d.InsertDailyPuzzle(ctx, n, date, themePtr)
 	if err != nil {
 		return emitError("db", err.Error(), nil)
 	}
@@ -310,7 +304,6 @@ func puzzleCreate(ctx context.Context, log *slog.Logger) error {
 		"puzzle_number": n,
 		"puzzle_id":     id.String(),
 		"puzzle_date":   date.Format("2006-01-02"),
-		"mode":          *modeStr,
 	})
 }
 
@@ -320,7 +313,6 @@ func puzzleCompose(ctx context.Context, log *slog.Logger) error {
 	fs := flag.NewFlagSet("puzzle compose", flag.ExitOnError)
 	dbf := registerDBFlags(fs)
 	dateStr := fs.String("date", "", "YYYY-MM-DD (required)")
-	modeStr := fs.String("mode", "", "force mode (default: rotation)")
 	promptsStr := fs.String("prompts", "", "comma-separated prompt UUIDs (3 required); default = uniform random")
 	r0Bots := fs.String("round0-bots", "", "explicit bot id(s) for round 0 (CSV); pairs with --round0-decoys")
 	r0Decoys := fs.String("round0-decoys", "", "explicit decoy id(s) for round 0 (CSV); pairs with --round0-bots")
@@ -347,7 +339,7 @@ func puzzleCompose(ctx context.Context, log *slog.Logger) error {
 		return err
 	}
 	defer d.Close()
-	return composePuzzle(ctx, d, log, date, db.Mode(*modeStr), *promptsStr, picks)
+	return composePuzzle(ctx, d, log, date, *promptsStr, picks)
 }
 
 // roundPick is one round's explicit-pick spec. zero value (both empty) means
@@ -402,12 +394,7 @@ func parseUUIDCSV(s string) ([]uuid.UUID, error) {
 	return out, nil
 }
 
-func composePuzzle(ctx context.Context, d *db.DB, log *slog.Logger, date time.Time, forcedMode db.Mode, promptsCSV string, picks [3]roundPick) error {
-	mode := forcedMode
-	if mode == "" {
-		mode = puzzle.PickMode(date)
-	}
-
+func composePuzzle(ctx context.Context, d *db.DB, log *slog.Logger, date time.Time, promptsCSV string, picks [3]roundPick) error {
 	// Pick prompts (explicit or random).
 	var promptIDs []uuid.UUID
 	if promptsCSV != "" {
@@ -437,7 +424,6 @@ func composePuzzle(ctx context.Context, d *db.DB, log *slog.Logger, date time.Ti
 	var puzzleID uuid.UUID
 	var puzzleNumber int32
 	if existing, err := d.PuzzleByDate(ctx, date); err == nil {
-		// Refuse to recompose a played puzzle.
 		played, perr := d.PuzzleHasPlays(ctx, existing.ID)
 		if perr != nil {
 			return emitError("db", perr.Error(), nil)
@@ -449,7 +435,6 @@ func composePuzzle(ctx context.Context, d *db.DB, log *slog.Logger, date time.Ti
 		}
 		puzzleID = existing.ID
 		puzzleNumber = existing.PuzzleNumber
-		// Allow updating mode and theme to the new values via InsertDailyPuzzle's upsert below.
 	}
 	if puzzleID == uuid.Nil {
 		n, err := d.NextPuzzleNumber(ctx)
@@ -458,29 +443,25 @@ func composePuzzle(ctx context.Context, d *db.DB, log *slog.Logger, date time.Ti
 		}
 		puzzleNumber = n
 	}
-	id, err := d.InsertDailyPuzzle(ctx, puzzleNumber, date, mode, nil)
+	id, err := d.InsertDailyPuzzle(ctx, puzzleNumber, date, nil)
 	if err != nil {
 		return emitError("db", err.Error(), nil)
 	}
 	puzzleID = id
 
 	for i, promptID := range promptIDs {
-		targetKind := "bot"
-		if mode == db.ModeFindHuman {
-			targetKind = "human"
-		}
-		roundID, err := d.InsertPuzzleRound(ctx, puzzleID, int16(i), promptID, targetKind, 1)
+		roundID, err := d.InsertPuzzleRound(ctx, puzzleID, int16(i), promptID, 1)
 		if err != nil {
 			return emitError("db", err.Error(), nil)
 		}
 		var answers []db.Answer
 		if picks[i].explicit() {
-			answers, err = puzzle.ComposeRoundAnswersExplicit(ctx, d, promptID, mode, picks[i].BotIDs, picks[i].DecoyIDs)
+			answers, err = puzzle.ComposeRoundAnswersExplicit(ctx, d, promptID, picks[i].BotIDs, picks[i].DecoyIDs)
 			if err != nil {
 				return composeAnswersErr(i, promptID, err)
 			}
 		} else {
-			answers, err = puzzle.ComposeRoundAnswers(ctx, d, promptID, mode)
+			answers, err = puzzle.ComposeRoundAnswers(ctx, d, promptID)
 			if err != nil {
 				return emitError("insufficient_content", fmt.Sprintf("round %d (prompt %s): %s", i, promptID, err.Error()), nil)
 			}
@@ -489,11 +470,10 @@ func composePuzzle(ctx context.Context, d *db.DB, log *slog.Logger, date time.Ti
 			return emitError("db", err.Error(), nil)
 		}
 	}
-	log.Info("composed puzzle", "n", puzzleNumber, "date", date.Format("2006-01-02"), "mode", mode)
+	log.Info("composed puzzle", "n", puzzleNumber, "date", date.Format("2006-01-02"))
 	return emitOK("compose", map[string]any{
 		"puzzle_number": puzzleNumber,
 		"puzzle_date":   date.Format("2006-01-02"),
-		"mode":          string(mode),
 	})
 }
 
@@ -513,7 +493,6 @@ func composeAnswersErr(roundIdx int, promptID uuid.UUID, err error) error {
 func puzzleEdit(ctx context.Context, log *slog.Logger) error {
 	fs := flag.NewFlagSet("puzzle edit", flag.ExitOnError)
 	dbf := registerDBFlags(fs)
-	modeStr := fs.String("mode", "", "find_the_bot | find_the_human")
 	theme := fs.String("theme", "", "new theme (empty string clears nothing — pass --clear-theme)")
 	dateStr := fs.String("date", "", "new puzzle_date YYYY-MM-DD")
 	if err := fs.Parse(os.Args[1:]); err != nil {
@@ -529,11 +508,6 @@ func puzzleEdit(ctx context.Context, log *slog.Logger) error {
 	}
 	defer d.Close()
 
-	var modePtr *db.Mode
-	if *modeStr != "" {
-		m := db.Mode(*modeStr)
-		modePtr = &m
-	}
 	var themePtr *string
 	if *theme != "" {
 		themePtr = theme
@@ -546,7 +520,7 @@ func puzzleEdit(ctx context.Context, log *slog.Logger) error {
 		}
 		datePtr = &t
 	}
-	if err := d.UpdateDailyPuzzle(ctx, n, modePtr, themePtr, datePtr); err != nil {
+	if err := d.UpdateDailyPuzzle(ctx, n, themePtr, datePtr); err != nil {
 		return puzzleErr(err)
 	}
 	return emitOK("edit", map[string]any{"puzzle_number": n})
@@ -606,22 +580,18 @@ func puzzleSetRound(ctx context.Context, log *slog.Logger) error {
 	if played {
 		return emitError("has_plays", "puzzle has plays; refuse to mutate rounds", map[string]any{"puzzle_number": n})
 	}
-	targetKind := "bot"
-	if p.Mode == db.ModeFindHuman {
-		targetKind = "human"
-	}
-	roundID, err := d.InsertPuzzleRound(ctx, p.ID, int16(*roundIdx), promptID, targetKind, 1)
+	roundID, err := d.InsertPuzzleRound(ctx, p.ID, int16(*roundIdx), promptID, 1)
 	if err != nil {
 		return emitError("db", err.Error(), nil)
 	}
 	var answers []db.Answer
 	if len(botIDs) > 0 {
-		answers, err = puzzle.ComposeRoundAnswersExplicit(ctx, d, promptID, p.Mode, botIDs, decoyIDs)
+		answers, err = puzzle.ComposeRoundAnswersExplicit(ctx, d, promptID, botIDs, decoyIDs)
 		if err != nil {
 			return composeAnswersErr(*roundIdx, promptID, err)
 		}
 	} else {
-		answers, err = puzzle.ComposeRoundAnswers(ctx, d, promptID, p.Mode)
+		answers, err = puzzle.ComposeRoundAnswers(ctx, d, promptID)
 		if err != nil {
 			return emitError("insufficient_content", err.Error(), nil)
 		}
@@ -873,7 +843,6 @@ func puzzleSchedule(ctx context.Context, log *slog.Logger) error {
 	dbf := registerDBFlags(fs)
 	startStr := fs.String("start", "", "YYYY-MM-DD (required)")
 	days := fs.Int("days", 7, "number of consecutive days to schedule")
-	modeStr := fs.String("mode", "", "force mode for every day (default: rotation)")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
 	}
@@ -897,7 +866,6 @@ func puzzleSchedule(ctx context.Context, log *slog.Logger) error {
 		Date         string `json:"date"`
 		Status       string `json:"status"` // "composed" | "skipped" | "failed"
 		PuzzleNumber int32  `json:"puzzle_number,omitempty"`
-		Mode         string `json:"mode,omitempty"`
 		Error        string `json:"error,omitempty"`
 	}
 	results := make([]result, 0, *days)
@@ -908,25 +876,21 @@ func puzzleSchedule(ctx context.Context, log *slog.Logger) error {
 		if existing, err := d.PuzzleByDate(ctx, date); err == nil {
 			results = append(results, result{
 				Date: date.Format("2006-01-02"), Status: "skipped",
-				PuzzleNumber: existing.PuzzleNumber, Mode: string(existing.Mode),
+				PuzzleNumber: existing.PuzzleNumber,
 			})
 			continue
 		} else if !db.IsNotFound(err) {
 			results = append(results, result{Date: date.Format("2006-01-02"), Status: "failed", Error: err.Error()})
 			continue
 		}
-		mode := db.Mode(*modeStr)
-		if mode == "" {
-			mode = puzzle.PickMode(date)
-		}
-		if err := composeOne(ctx, d, log, date, mode); err != nil {
+		if err := composeOne(ctx, d, log, date); err != nil {
 			results = append(results, result{Date: date.Format("2006-01-02"), Status: "failed", Error: err.Error()})
 			continue
 		}
 		p, _ := d.PuzzleByDate(ctx, date)
 		results = append(results, result{
 			Date: date.Format("2006-01-02"), Status: "composed",
-			PuzzleNumber: p.PuzzleNumber, Mode: string(mode),
+			PuzzleNumber: p.PuzzleNumber,
 		})
 	}
 	return emitJSON(map[string]any{"scheduled": results})
@@ -934,7 +898,7 @@ func puzzleSchedule(ctx context.Context, log *slog.Logger) error {
 
 // composeOne is the schedule-loop's per-day composer. It does not write the
 // per-day error envelope itself (the loop aggregates results).
-func composeOne(ctx context.Context, d *db.DB, log *slog.Logger, date time.Time, mode db.Mode) error {
+func composeOne(ctx context.Context, d *db.DB, log *slog.Logger, date time.Time) error {
 	promptIDs, err := puzzle.SelectPrompts(ctx, d, 3)
 	if err != nil {
 		return err
@@ -946,20 +910,16 @@ func composeOne(ctx context.Context, d *db.DB, log *slog.Logger, date time.Time,
 	if err != nil {
 		return err
 	}
-	puzzleID, err := d.InsertDailyPuzzle(ctx, n, date, mode, nil)
+	puzzleID, err := d.InsertDailyPuzzle(ctx, n, date, nil)
 	if err != nil {
 		return err
 	}
 	for i, promptID := range promptIDs {
-		targetKind := "bot"
-		if mode == db.ModeFindHuman {
-			targetKind = "human"
-		}
-		roundID, err := d.InsertPuzzleRound(ctx, puzzleID, int16(i), promptID, targetKind, 1)
+		roundID, err := d.InsertPuzzleRound(ctx, puzzleID, int16(i), promptID, 1)
 		if err != nil {
 			return err
 		}
-		answers, err := puzzle.ComposeRoundAnswers(ctx, d, promptID, mode)
+		answers, err := puzzle.ComposeRoundAnswers(ctx, d, promptID)
 		if err != nil {
 			return fmt.Errorf("round %d (prompt %s): %w", i, promptID, err)
 		}
@@ -967,7 +927,7 @@ func composeOne(ctx context.Context, d *db.DB, log *slog.Logger, date time.Time,
 			return err
 		}
 	}
-	log.Info("scheduled puzzle", "n", n, "date", date.Format("2006-01-02"), "mode", mode)
+	log.Info("scheduled puzzle", "n", n, "date", date.Format("2006-01-02"))
 	return nil
 }
 
@@ -1025,7 +985,6 @@ func puzzlesToJSON(puzzles []db.DailyPuzzle) []map[string]any {
 		out = append(out, map[string]any{
 			"puzzle_number": p.PuzzleNumber,
 			"puzzle_date":   p.PuzzleDate.Format("2006-01-02"),
-			"mode":          string(p.Mode),
 			"frozen_at":     p.FrozenAt.UTC().Format(time.RFC3339),
 			"theme":         p.Theme,
 		})

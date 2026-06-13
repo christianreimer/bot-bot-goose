@@ -4,7 +4,6 @@ import (
 	"math"
 	"net/http"
 
-	"github.com/christianreimer/bot-bot-goose/internal/game"
 	"github.com/christianreimer/bot-bot-goose/internal/leaderboard"
 	"github.com/christianreimer/bot-bot-goose/internal/share"
 	"github.com/go-chi/chi/v5"
@@ -31,20 +30,23 @@ func (s *Server) handleDecoyShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Compute the same stats /me shows, so the public page and the user's
-	// dashboard tell the same story.
-	totalImp := pd.BotImp + pd.HumanImp
-	totalPicked := pd.BotPicked + pd.HumanPicked
-	mode := game.FindTheBot
-	if pd.HumanImp > pd.BotImp {
-		mode = game.FindTheHuman
+	// Compute the same stats /me shows so the public page and the user's
+	// dashboard tell the same story. Realest = primary, fool = flavor.
+	realestImp := pd.RealestImpressions
+	realestVotes := pd.RealestVotes
+	foolImp := pd.Impressions
+	foolPicked := pd.PickedAsBot
+
+	realestRaw := 0
+	if realestImp > 0 {
+		realestRaw = int(math.Round(100 * float64(realestVotes) / float64(realestImp)))
 	}
-	rawPct := 0
-	if totalImp > 0 {
-		rawPct = int(math.Round(100 * float64(totalPicked) / float64(totalImp)))
+	foolRaw := 0
+	if foolImp > 0 {
+		foolRaw = int(math.Round(100 * float64(foolPicked) / float64(foolImp)))
 	}
-	baselinePct := int(math.Round(100 * game.BaselineFor(mode)))
-	beyond := game.ForgerPoints(int(totalPicked), int(totalImp), mode)
+	realestBaselinePct := int(math.Round(100 * leaderboard.RealestBaseline))
+	realestBeyond := leaderboard.RealestBeyondChance(realestVotes, realestImp)
 
 	// Pull the author's forger ranking for the rank/tier line.
 	var rank int
@@ -67,17 +69,20 @@ func (s *Server) handleDecoyShare(w http.ResponseWriter, r *http.Request) {
 	// Pre-build the share card so the page's "Share this" button hands the
 	// exact same text as /me's "Share report ▸".
 	card := share.DecoyReportCard(share.DecoyReport{
-		Text:         pd.Text,
-		RawPct:       rawPct,
-		Impressions:  totalImp,
-		Fooled:       totalPicked,
-		BeyondChance: beyond,
-		Eligible:     rank > 0,
-		Rank:         rank,
-		OfTotal:      ofTotal,
-		Tier:         tier,
-		Status:       pd.Status,
-		ShareURL:     pageURL,
+		Text:               pd.Text,
+		RealestRawPct:      realestRaw,
+		RealestImpressions: realestImp,
+		RealestVotes:       realestVotes,
+		RealestBeyond:      realestBeyond,
+		FoolImpressions:    foolImp,
+		FoolPicked:         foolPicked,
+		FoolRawPct:         foolRaw,
+		Eligible:           rank > 0,
+		Rank:               rank,
+		OfTotal:            ofTotal,
+		Tier:               tier,
+		Status:             pd.Status,
+		ShareURL:           pageURL,
 	}, baseURL)
 
 	authorLabel := pd.AuthorHandle
@@ -86,24 +91,26 @@ func (s *Server) handleDecoyShare(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.renderHTML(w, http.StatusOK, "pages/decoy_share.html", map[string]any{
-		"PuzzleNumber": int32(0),
-		"PromptText":   pd.PromptText,
-		"DecoyText":    pd.Text,
-		"Author":       authorLabel,
-		"Status":       pd.Status,
-		"TotalImp":     totalImp,
-		"TotalPicked":  totalPicked,
-		"RawPct":       rawPct,
-		"BaselinePct":  baselinePct,
-		"BeyondChance": beyond,
-		"Mode":         string(mode),
-		"Tier":         tier,
-		"Rank":         rank,
-		"OfTotal":      ofTotal,
-		"ShareCard":    card,
-		"ShareURL":     pageURL,
-		"OGImageURL":   ogImageURL,
-		"BaseURL":      baseURL,
+		"PuzzleNumber":       int32(0),
+		"PromptText":         pd.PromptText,
+		"DecoyText":          pd.Text,
+		"Author":             authorLabel,
+		"Status":             pd.Status,
+		"RealestImp":         realestImp,
+		"RealestVotes":       realestVotes,
+		"RealestRawPct":      realestRaw,
+		"RealestBaselinePct": realestBaselinePct,
+		"RealestBeyond":      realestBeyond,
+		"FoolImp":            foolImp,
+		"FoolPicked":         foolPicked,
+		"FoolRawPct":         foolRaw,
+		"Tier":               tier,
+		"Rank":               rank,
+		"OfTotal":            ofTotal,
+		"ShareCard":          card,
+		"ShareURL":           pageURL,
+		"OGImageURL":         ogImageURL,
+		"BaseURL":            baseURL,
 	})
 }
 

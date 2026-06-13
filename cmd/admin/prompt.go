@@ -51,7 +51,7 @@ func promptUsage() {
   edit    Edit prompt text or theme.
   retire  Soft-retire (sets retired_at; reversible only via SQL).
   delete  Hard delete; refuses when referenced by any puzzle_rounds.
-  supply  Per-prompt bot/decoy/pending counts + puzzle usage. Filter by --mode.`)
+  supply  Per-prompt bot/decoy/pending counts + puzzle usage. Ready threshold: ≥1 approved bot, ≥4 approved decoys.`)
 }
 
 func promptList(ctx context.Context, log *slog.Logger) error {
@@ -253,28 +253,22 @@ func promptDelete(ctx context.Context, log *slog.Logger) error {
 // Per-prompt content-readiness rollup. Answers the "which prompts can I build
 // a puzzle from right now" question that every puzzle-build session opens with.
 //
-// Mode thresholds (hard requirements per round, doubled here as the "ready"
-// target so there's a spare in the pool):
+// Ready threshold (doubled from the per-round requirement so there's a
+// spare in the pool):
 //
-//   find_the_bot   — needs 1 bot + 3 decoys per round.   Ready: ≥1 bot, ≥4 decoys.
-//   find_the_human — needs 3 bots + 1 decoy per round.   Ready: ≥3 bots, ≥2 decoys.
+//   ≥1 approved bot, ≥4 approved decoys per prompt.
 //
-// Without --mode, the rollup is mode-agnostic: every prompt shows up sorted
-// by name. With --mode, a READY column is added and prompts that haven't met
-// the threshold sort first by gap-size (most-undersupplied first).
+// Prompts that haven't met the threshold sort first by gap-size
+// (most-undersupplied first).
 
 func promptSupply(ctx context.Context, log *slog.Logger) error {
 	fs := flag.NewFlagSet("prompt supply", flag.ExitOnError)
 	dbf := registerDBFlags(fs)
-	mode := fs.String("mode", "", "filter/threshold by mode: find_the_bot | find_the_human")
-	onlyUnready := fs.Bool("only-unready", false, "with --mode, hide prompts that already meet the threshold")
+	onlyUnready := fs.Bool("only-unready", false, "hide prompts that already meet the threshold")
 	onlyUnused := fs.Bool("only-unused", false, "hide prompts that appear in any past or scheduled puzzle")
 	asTable := fs.Bool("table", false, "human-readable table instead of JSON")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
-	}
-	if *mode != "" && *mode != "find_the_bot" && *mode != "find_the_human" {
-		return emitError("invalid", "--mode must be find_the_bot or find_the_human", nil)
 	}
 	d, err := openDB(ctx, dbf, log)
 	if err != nil {
@@ -293,100 +287,67 @@ func promptSupply(ctx context.Context, log *slog.Logger) error {
 			continue
 		}
 		e := promptSupplyRow{r: r}
-		if *mode != "" {
-			e.modeKnown = true
-			e.gap, e.ready = supplyGap(*mode, r.ApprovedBots, r.ApprovedDecoys)
-			if *onlyUnready && e.ready {
-				continue
-			}
+		e.gap, e.ready = supplyGap(r.ApprovedBots, r.ApprovedDecoys)
+		if *onlyUnready && e.ready {
+			continue
 		}
 		enrichedRollups = append(enrichedRollups, e)
 	}
-	if *mode != "" {
-		// Unready first (largest gap first), then ready prompts (stable order
-		// preserves the alphabetical-by-text sort from PromptSupplyCounts).
-		sort.SliceStable(enrichedRollups, func(i, j int) bool {
-			a, b := enrichedRollups[i], enrichedRollups[j]
-			if a.ready != b.ready {
-				return !a.ready // unready first
-			}
-			if !a.ready {
-				return a.gap > b.gap // larger gap first among unready
-			}
-			return false
-		})
-	}
+	// Unready first (largest gap first), then ready prompts (stable order
+	// preserves the alphabetical-by-text sort from PromptSupplyCounts).
+	sort.SliceStable(enrichedRollups, func(i, j int) bool {
+		a, b := enrichedRollups[i], enrichedRollups[j]
+		if a.ready != b.ready {
+			return !a.ready // unready first
+		}
+		if !a.ready {
+			return a.gap > b.gap // larger gap first among unready
+		}
+		return false
+	})
 
 	if *asTable {
-		headers := []string{"PROMPT_ID", "BOTS", "DECOYS", "PENDING", "USED_IN", "PROMPT"}
-		if *mode != "" {
-			headers = []string{"PROMPT_ID", "BOTS", "DECOYS", "PENDING", "USED_IN", "READY", "GAP", "PROMPT"}
-		}
+		headers := []string{"PROMPT_ID", "BOTS", "DECOYS", "PENDING", "USED_IN", "READY", "GAP", "PROMPT"}
 		rows := make([][]any, 0, len(enrichedRollups))
 		for _, e := range enrichedRollups {
 			usedIn := "-"
 			if len(e.r.UsedInPuzzles) > 0 {
 				usedIn = joinInt32s(e.r.UsedInPuzzles, ",")
 			}
-			if *mode != "" {
-				rows = append(rows, []any{
-					e.r.PromptID.String()[:8],
-					e.r.ApprovedBots, e.r.ApprovedDecoys, e.r.PendingDecoys,
-					usedIn,
-					boolYN(e.ready),
-					e.gap,
-					truncate(e.r.PromptText, 60),
-				})
-				continue
-			}
 			rows = append(rows, []any{
 				e.r.PromptID.String()[:8],
 				e.r.ApprovedBots, e.r.ApprovedDecoys, e.r.PendingDecoys,
 				usedIn,
+				boolYN(e.ready),
+				e.gap,
 				truncate(e.r.PromptText, 60),
 			})
 		}
 		return emitTable(headers, rows)
 	}
 
-	// JSON: stable shape; include mode-derived fields only when mode was set.
 	out := make([]map[string]any, 0, len(enrichedRollups))
 	for _, e := range enrichedRollups {
-		row := map[string]any{
+		out = append(out, map[string]any{
 			"prompt_id":       e.r.PromptID.String(),
 			"prompt_text":     e.r.PromptText,
 			"approved_bots":   e.r.ApprovedBots,
 			"approved_decoys": e.r.ApprovedDecoys,
 			"pending_decoys":  e.r.PendingDecoys,
 			"used_in_puzzles": e.r.UsedInPuzzles,
-		}
-		if e.modeKnown {
-			row["ready"] = e.ready
-			row["gap"] = e.gap
-		}
-		out = append(out, row)
+			"ready":           e.ready,
+			"gap":             e.gap,
+		})
 	}
-	if *mode == "" {
-		return emitJSON(out)
-	}
-	return emitJSON(map[string]any{
-		"mode":   *mode,
-		"counts": out,
-	})
+	return emitJSON(out)
 }
 
 // supplyGap reports how short the (bots, decoys) supply is for one prompt
-// against the mode's per-round-with-buffer target. Returns gap=0 + ready=true
+// against the fixed targets (1 bot, 4 decoys). Returns gap=0 + ready=true
 // once both thresholds are met. The gap is the sum across both axes so a
 // prompt missing 2 bots + 3 decoys is ranked behind one missing just 1 bot.
-func supplyGap(mode string, bots, decoys int) (gap int, ready bool) {
-	var botTarget, decoyTarget int
-	switch mode {
-	case "find_the_bot":
-		botTarget, decoyTarget = 1, 4
-	case "find_the_human":
-		botTarget, decoyTarget = 3, 2
-	}
+func supplyGap(bots, decoys int) (gap int, ready bool) {
+	const botTarget, decoyTarget = 1, 4
 	botMiss := botTarget - bots
 	if botMiss < 0 {
 		botMiss = 0
@@ -399,12 +360,11 @@ func supplyGap(mode string, bots, decoys int) (gap int, ready bool) {
 	return gap, gap == 0
 }
 
-// promptSupplyRow pairs a rollup row with the mode-derived ready/gap state.
+// promptSupplyRow pairs a rollup row with the ready/gap state.
 type promptSupplyRow struct {
-	r         db.PromptSupplyRollup
-	gap       int  // mode-specific "how many more rows needed to be ready"; 0 = ready
-	ready     bool // whether this prompt meets the mode threshold
-	modeKnown bool // mode was passed by the operator (gap/ready are meaningful)
+	r     db.PromptSupplyRollup
+	gap   int  // how many more rows needed to be ready; 0 = ready
+	ready bool // whether this prompt meets the threshold
 }
 
 func joinInt32s(xs []int32, sep string) string {

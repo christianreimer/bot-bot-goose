@@ -72,14 +72,13 @@
 
   function renderRound() {
     const r = state.round;
-    const isHunt = r.target_label === 'human' ? 'human' : 'bot';
     // First-round, not-signed-in attention pulse on the hunt-target word.
     // Returning signed-in players already know the rule; the pulse would
     // just be noise. Round 1 only — by round 2 they've made a guess.
     const showHuntPulse = r.index === 0 && stage.dataset.signedIn !== '1';
     const huntClass = showHuntPulse ? 'hunt hunt-attention' : 'hunt';
     stage.innerHTML = `
-      <div class="round-label">Round ${r.index + 1} of ${N_ROUNDS} <span class="${huntClass}">· Tap the ${isHunt}</span></div>
+      <div class="round-label">Round ${r.index + 1} of ${N_ROUNDS} <span class="${huntClass}">· Find the bot</span></div>
       <div class="prompt"></div>
       <div class="answers" id="answers"></div>
       <div class="controls" id="controls"></div>`;
@@ -99,8 +98,8 @@
     const hint = document.createElement('button');
     hint.className = 'btn btn-ghost';
     hint.textContent = r.hint_used
-      ? 'Hint used. One decoy removed.'
-      : `Honk for a hint (removes one ${isHunt === 'human' ? 'bot' : 'human'})`;
+      ? 'Hint used. One human removed.'
+      : 'Honk for a hint (removes one human)';
     hint.disabled = !!r.hint_used || state.locked;
     hint.onclick = useHint;
     ctl.appendChild(hint);
@@ -137,10 +136,19 @@
 
     state.outcomes = res.outcomes;
     revealRound(slot, res.target_slots, res.outcome);
+    armRealestVote(res.target_slots);
 
-    // Replace the controls with a "Next round" button.
+    // Replace the controls with a vote prompt + "Next round" / "See result"
+    // button. The vote is optional — skipping by tapping Next records nothing.
     const ctl = document.getElementById('controls');
     ctl.innerHTML = '';
+
+    const voteHint = document.createElement('div');
+    voteHint.className = 'vote-hint';
+    voteHint.id = 'voteHint';
+    voteHint.textContent = 'Which one felt most human?';
+    ctl.appendChild(voteHint);
+
     const next = document.createElement('button');
     next.className = 'btn btn-primary';
     if (res.completed) {
@@ -163,6 +171,54 @@
     renderProgress();
   }
 
+  // Wire up "felt most human" voting. Only the three human cards are
+  // tappable — the goose card has already been outed and is not votable.
+  // One vote per round; tapping again moves the vote (idempotent server-side).
+  function armRealestVote(targetSlots) {
+    const targets = new Set(targetSlots || []);
+    const r = state.round;
+    const btns = document.querySelectorAll('.answer');
+    let chosenSlot = null;
+
+    btns.forEach((b, idx) => {
+      if (targets.has(idx)) return; // bot card not votable
+      b.classList.add('votable');
+      b.classList.remove('dimmed');
+      b.disabled = false;
+      // Tap-to-vote on the human cards. The earlier reveal logic already
+      // disabled them; we re-enable for the vote phase.
+      b.addEventListener('click', async () => {
+        if (chosenSlot === idx) return;
+        chosenSlot = idx;
+        // Visual: drop the chip on the chosen card, strip it from any prior
+        // selection, and pulse the .voted class for the border treatment.
+        btns.forEach((other, otherIdx) => {
+          if (targets.has(otherIdx)) return;
+          const wasChosen = otherIdx === idx;
+          other.classList.toggle('voted', wasChosen);
+          const existing = other.querySelector('.tag.human');
+          if (existing) existing.remove();
+          if (wasChosen) {
+            const chip = document.createElement('span');
+            chip.className = 'tag human';
+            chip.textContent = 'most human';
+            other.appendChild(chip);
+          }
+        });
+        const hint = document.getElementById('voteHint');
+        if (hint) hint.textContent = 'Vote logged. Tap another to switch.';
+        try {
+          await postJSON(`/api/play/round/${r.index}/realest`, {
+            token: r.token,
+            slot: idx,
+          });
+        } catch (e) {
+          if (hint) hint.textContent = 'Vote failed: ' + e.message;
+        }
+      });
+    });
+  }
+
   function revealRound(yourSlot, targetSlots, outcome) {
     const btns = document.querySelectorAll('.answer');
     const target = new Set(targetSlots || []);
@@ -172,7 +228,7 @@
         b.classList.add('goose');
         const tag = document.createElement('span');
         tag.className = 'tag goose';
-        tag.textContent = state.round.target_label === 'human' ? 'the human' : 'the goose';
+        tag.textContent = 'the goose';
         b.appendChild(tag);
         const pop = document.createElement('span');
         pop.className = 'honk-pop';

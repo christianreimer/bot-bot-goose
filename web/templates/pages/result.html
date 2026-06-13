@@ -17,7 +17,7 @@
       <div class="scorecard">
         <div class="grid-rows" id="grid">{{ .Grid }}</div>
         <div class="botdar">
-          <div class="stat"><div class="n honk">{{ .ScorePct }}%</div><div class="l">{{ if eq .Mode "find_the_human" }}Human-Dar{{ else }}Bot-Dar{{ end }}</div></div>
+          <div class="stat"><div class="n honk">{{ .ScorePct }}%</div><div class="l">Bot-Dar</div></div>
           <div class="stat"><div class="n">{{ .Streak }}</div><div class="l">streak</div></div>
         </div>
       </div>
@@ -44,24 +44,23 @@
         <div class="decoy">
           <h3>You've planted one here already 🪶</h3>
           <p><span class="nextprompt">&ldquo;{{ .NextPromptText }}&rdquo;</span><br>
-            One decoy per prompt per player. Yours is
+            One line per prompt per player. Yours is
             {{ if eq .ExistingDecoyStatus "pending" }}<b>in review</b>{{ end }}
             {{ if eq .ExistingDecoyStatus "approved" }}<b>live</b>{{ end }}
             {{ if eq .ExistingDecoyStatus "rejected" }}<b>not picked</b>{{ end }}
             {{ if eq .ExistingDecoyStatus "retired" }}<b>retired</b>{{ end }}.
           </p>
           <div class="controls" style="margin-top:0;">
-            <a class="btn btn-ghost" href="{{ .ExistingDecoyShareURL }}" style="text-align:center;text-decoration:none;display:block;">See your decoy ▸</a>
+            <a class="btn btn-ghost" href="{{ .ExistingDecoyShareURL }}" style="text-align:center;text-decoration:none;display:block;">See your line ▸</a>
           </div>
         </div>
         {{ else }}
         <div class="decoy">
-          <h3>Set a trap</h3>
+          <h3>Stand with the humans</h3>
           <p class="decoy-target"><span class="nextprompt">&ldquo;{{ .NextPromptText }}&rdquo;</span></p>
           <p class="decoy-body">
-            Type like a person, not a press release.<br>
-            The strongest answers slot in beside the bot and fool strangers.<br>
-            Around here, that's a compliment.
+            Every round, three humans face a bot.<br>
+            Your answer joins a future lineup. If real players pick yours as the most human after the reveal, you climb the forger leaderboard.
           </p>
           <form id="decoyForm" data-prompt-id="{{ .NextPromptID }}">
             <textarea id="decoyText" maxlength="220" minlength="4" required

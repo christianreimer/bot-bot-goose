@@ -2,7 +2,7 @@
 
 ## What it is
 
-A daily web game. One prompt, four answers, three rounds. The player taps the odd one out — a bot among humans, or (on inverted days) a human among bots. After three rounds, a Bot-Dar score and a shareable emoji grid.
+A daily web game. One prompt, four answers, three rounds. The player taps the odd one out: a bot hiding among three human answers. After three rounds, a Bot-Dar score and a shareable emoji grid.
 
 The cultural bet: *can you still tell a human from an AI?* is a loaded question right now, and the answer feels like an identity statement. That's what makes the grid worth posting.
 

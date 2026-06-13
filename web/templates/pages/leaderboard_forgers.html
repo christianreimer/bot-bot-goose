@@ -10,9 +10,9 @@
 {{ define "content" }}
   <div class="stage">
     <div class="me-header">
-      <div class="page-mark">🤖</div>
+      <div class="page-mark">🪶</div>
       <h2>Forger leaderboard</h2>
-      <div class="verdict">Best at sounding bot-ish. Ranked on adjusted fool rate.</div>
+      <div class="verdict">Best at reading human. Ranked on adjusted most-human votes.</div>
     </div>
 
     {{ if .Rows }}
@@ -22,16 +22,16 @@
           <div class="lb-rank">#{{ .Rank }}</div>
           <div class="lb-who">
             <div class="lb-handle">{{ .Handle }}</div>
-            <div class="lb-sub muted">{{ .Tier }} · {{ .TotalPickedAsBot }} of {{ .TotalImpressions }}</div>
+            <div class="lb-sub muted">{{ .Tier }} · {{ .RealestVotes }} of {{ .RealestImps }}</div>
           </div>
-          <div class="lb-stat"><span class="n honk">{{ .AdjustedPct }}%</span><span class="l">adj. fool</span></div>
+          <div class="lb-stat"><span class="n honk">{{ .RealestPct }}%</span><span class="l">most human</span></div>
         </div>
       {{ end }}
       </div>
     {{ else }}
       <div class="muted empty">
-        No forgers above {{ .GateMin }} impressions yet. Submit a decoy from any result page.
-        Once it accumulates {{ .GateMin }} impressions across players, you'll appear here.
+        No forgers above {{ .GateMin }} votes yet. Plant a line from any result page.
+        Once enough players vote on it, you'll appear here.
       </div>
     {{ end }}
 

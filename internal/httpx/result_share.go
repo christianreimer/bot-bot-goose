@@ -3,7 +3,6 @@ package httpx
 import (
 	"net/http"
 
-	"github.com/christianreimer/bot-bot-goose/internal/game"
 	"github.com/christianreimer/bot-bot-goose/internal/share"
 	"github.com/go-chi/chi/v5"
 )
@@ -30,19 +29,13 @@ func (s *Server) handleResultShare(w http.ResponseWriter, r *http.Request) {
 	pageURL := baseURL + "/r/" + shortID
 	imgURL := baseURL + "/r/" + shortID + "/og.png"
 
-	statLabel := "Bot-Dar"
-	target := "goose"
-	if pp.Mode == game.FindTheHuman {
-		statLabel = "Human-Dar"
-		target = "human"
-	}
 	// Sweep (0/3) is not a success — don't frame it as one. Mirrors the
 	// strike-through "caught → got away" treatment on the player-facing
 	// result page. The kicker on the share page and the og:title both
 	// flip to the honest verb.
-	titleVerb := "spotted the " + target
+	titleVerb := "spotted the goose"
 	if pp.ScorePct == 0 {
-		titleVerb = "let the " + target + " get away"
+		titleVerb = "let the goose get away"
 	}
 
 	// Server-rendered card line for the page body (the shared text bubble
@@ -51,10 +44,9 @@ func (s *Server) handleResultShare(w http.ResponseWriter, r *http.Request) {
 
 	s.renderHTML(w, http.StatusOK, "pages/result_share.html", map[string]any{
 		"PuzzleNumber": pp.PuzzleNumber,
-		"Mode":         string(pp.Mode),
 		"Grid":         cardLine,
 		"ScorePct":     pp.ScorePct,
-		"StatLabel":    statLabel,
+		"StatLabel":    "Bot-Dar",
 		"Streak":       pp.Streak,
 		"Author":       pp.AuthorHandle,
 		"TitleVerb":    titleVerb,
@@ -83,7 +75,6 @@ func (s *Server) handleResultShareOG(w http.ResponseWriter, r *http.Request) {
 	png, err := share.RenderResultOG(share.ResultOG{
 		PuzzleNumber: pp.PuzzleNumber,
 		Outcomes:     pp.Outcomes,
-		Mode:         pp.Mode,
 		Streak:       pp.Streak,
 	})
 	if err != nil {

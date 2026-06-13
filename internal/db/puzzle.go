@@ -14,7 +14,7 @@ import (
 // puzzle_number whose puzzle_date <= today UTC).
 func (d *DB) LatestPuzzle(ctx context.Context, asOf time.Time) (*DailyPuzzle, error) {
 	const q = `
-		SELECT id, puzzle_number, puzzle_date, mode, frozen_at, theme
+		SELECT id, puzzle_number, puzzle_date, frozen_at, theme
 		  FROM daily_puzzles
 		 WHERE puzzle_date <= $1::date
 		 ORDER BY puzzle_number DESC
@@ -22,7 +22,7 @@ func (d *DB) LatestPuzzle(ctx context.Context, asOf time.Time) (*DailyPuzzle, er
 	`
 	row := d.QueryRow(ctx, q, asOf)
 	p := &DailyPuzzle{}
-	if err := row.Scan(&p.ID, &p.PuzzleNumber, &p.PuzzleDate, &p.Mode, &p.FrozenAt, &p.Theme); err != nil {
+	if err := row.Scan(&p.ID, &p.PuzzleNumber, &p.PuzzleDate, &p.FrozenAt, &p.Theme); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -35,12 +35,12 @@ func (d *DB) LatestPuzzle(ctx context.Context, asOf time.Time) (*DailyPuzzle, er
 // playRow on hand and only need to look up the puzzle_number for share URLs.
 func (d *DB) PuzzleByID(ctx context.Context, id uuid.UUID) (*DailyPuzzle, error) {
 	const q = `
-		SELECT id, puzzle_number, puzzle_date, mode, frozen_at, theme
+		SELECT id, puzzle_number, puzzle_date, frozen_at, theme
 		  FROM daily_puzzles WHERE id = $1
 	`
 	p := &DailyPuzzle{}
 	row := d.QueryRow(ctx, q, id)
-	if err := row.Scan(&p.ID, &p.PuzzleNumber, &p.PuzzleDate, &p.Mode, &p.FrozenAt, &p.Theme); err != nil {
+	if err := row.Scan(&p.ID, &p.PuzzleNumber, &p.PuzzleDate, &p.FrozenAt, &p.Theme); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -52,13 +52,13 @@ func (d *DB) PuzzleByID(ctx context.Context, id uuid.UUID) (*DailyPuzzle, error)
 // PuzzleByNumber loads a specific puzzle by its monotonic number.
 func (d *DB) PuzzleByNumber(ctx context.Context, n int32) (*DailyPuzzle, error) {
 	const q = `
-		SELECT id, puzzle_number, puzzle_date, mode, frozen_at, theme
+		SELECT id, puzzle_number, puzzle_date, frozen_at, theme
 		  FROM daily_puzzles
 		 WHERE puzzle_number = $1
 	`
 	row := d.QueryRow(ctx, q, n)
 	p := &DailyPuzzle{}
-	if err := row.Scan(&p.ID, &p.PuzzleNumber, &p.PuzzleDate, &p.Mode, &p.FrozenAt, &p.Theme); err != nil {
+	if err := row.Scan(&p.ID, &p.PuzzleNumber, &p.PuzzleDate, &p.FrozenAt, &p.Theme); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -71,7 +71,7 @@ func (d *DB) PuzzleByNumber(ctx context.Context, n int32) (*DailyPuzzle, error) 
 func (d *DB) Rounds(ctx context.Context, puzzleID uuid.UUID) ([]PuzzleRound, error) {
 	const q = `
 		SELECT r.id, r.daily_puzzle_id, r.round_index, r.prompt_id, p.text,
-		       r.target_kind, r.target_count
+		       r.target_count
 		  FROM puzzle_rounds r
 		  JOIN prompts p ON p.id = r.prompt_id
 		 WHERE r.daily_puzzle_id = $1
@@ -85,7 +85,7 @@ func (d *DB) Rounds(ctx context.Context, puzzleID uuid.UUID) ([]PuzzleRound, err
 	var out []PuzzleRound
 	for rows.Next() {
 		var r PuzzleRound
-		if err := rows.Scan(&r.ID, &r.DailyPuzzleID, &r.RoundIndex, &r.PromptID, &r.PromptText, &r.TargetKind, &r.TargetCount); err != nil {
+		if err := rows.Scan(&r.ID, &r.DailyPuzzleID, &r.RoundIndex, &r.PromptID, &r.PromptText, &r.TargetCount); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -120,17 +120,16 @@ func (d *DB) AnswersForRound(ctx context.Context, roundID uuid.UUID) ([]Answer, 
 }
 
 // InsertDailyPuzzle creates the puzzle row. Idempotent on puzzle_number.
-func (d *DB) InsertDailyPuzzle(ctx context.Context, n int32, date time.Time, mode Mode, theme *string) (uuid.UUID, error) {
+func (d *DB) InsertDailyPuzzle(ctx context.Context, n int32, date time.Time, theme *string) (uuid.UUID, error) {
 	var id uuid.UUID
 	err := d.QueryRow(ctx, `
-		INSERT INTO daily_puzzles (puzzle_number, puzzle_date, mode, theme)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO daily_puzzles (puzzle_number, puzzle_date, theme)
+		VALUES ($1, $2, $3)
 		ON CONFLICT (puzzle_number) DO UPDATE
 		   SET puzzle_date = EXCLUDED.puzzle_date,
-		       mode = EXCLUDED.mode,
 		       theme = EXCLUDED.theme
 		RETURNING id
-	`, n, date, string(mode), theme).Scan(&id)
+	`, n, date, theme).Scan(&id)
 	return id, err
 }
 
@@ -237,17 +236,17 @@ func (d *DB) UpsertPrompt(ctx context.Context, text string) (uuid.UUID, error) {
 }
 
 // InsertPuzzleRound inserts a round; idempotent on (daily_puzzle_id, round_index).
-func (d *DB) InsertPuzzleRound(ctx context.Context, puzzleID uuid.UUID, idx int16, promptID uuid.UUID, targetKind string, targetCount int16) (uuid.UUID, error) {
+// Every round targets the bot (single-mode), so there's no target_kind to set.
+func (d *DB) InsertPuzzleRound(ctx context.Context, puzzleID uuid.UUID, idx int16, promptID uuid.UUID, targetCount int16) (uuid.UUID, error) {
 	var id uuid.UUID
 	err := d.QueryRow(ctx, `
-		INSERT INTO puzzle_rounds (daily_puzzle_id, round_index, prompt_id, target_kind, target_count)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO puzzle_rounds (daily_puzzle_id, round_index, prompt_id, target_count)
+		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (daily_puzzle_id, round_index) DO UPDATE
 		   SET prompt_id = EXCLUDED.prompt_id,
-		       target_kind = EXCLUDED.target_kind,
 		       target_count = EXCLUDED.target_count
 		RETURNING id
-	`, puzzleID, idx, promptID, targetKind, targetCount).Scan(&id)
+	`, puzzleID, idx, promptID, targetCount).Scan(&id)
 	return id, err
 }
 
@@ -318,7 +317,7 @@ type PuzzleListOpts struct {
 
 // ListDailyPuzzles returns puzzles ordered by puzzle_date ASC (upcoming first).
 func (d *DB) ListDailyPuzzles(ctx context.Context, opts PuzzleListOpts) ([]DailyPuzzle, error) {
-	q := `SELECT id, puzzle_number, puzzle_date, mode, frozen_at, theme
+	q := `SELECT id, puzzle_number, puzzle_date, frozen_at, theme
 	        FROM daily_puzzles WHERE 1=1`
 	args := []any{}
 	if opts.From != nil {
@@ -346,7 +345,7 @@ func (d *DB) ListDailyPuzzles(ctx context.Context, opts PuzzleListOpts) ([]Daily
 	var out []DailyPuzzle
 	for rows.Next() {
 		var p DailyPuzzle
-		if err := rows.Scan(&p.ID, &p.PuzzleNumber, &p.PuzzleDate, &p.Mode, &p.FrozenAt, &p.Theme); err != nil {
+		if err := rows.Scan(&p.ID, &p.PuzzleNumber, &p.PuzzleDate, &p.FrozenAt, &p.Theme); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -356,11 +355,11 @@ func (d *DB) ListDailyPuzzles(ctx context.Context, opts PuzzleListOpts) ([]Daily
 
 // PuzzleByDate finds the puzzle for an exact date. Useful for `--date` lookups.
 func (d *DB) PuzzleByDate(ctx context.Context, date time.Time) (*DailyPuzzle, error) {
-	const q = `SELECT id, puzzle_number, puzzle_date, mode, frozen_at, theme
+	const q = `SELECT id, puzzle_number, puzzle_date, frozen_at, theme
 	             FROM daily_puzzles WHERE puzzle_date = $1 LIMIT 1`
 	row := d.QueryRow(ctx, q, date)
 	p := &DailyPuzzle{}
-	if err := row.Scan(&p.ID, &p.PuzzleNumber, &p.PuzzleDate, &p.Mode, &p.FrozenAt, &p.Theme); err != nil {
+	if err := row.Scan(&p.ID, &p.PuzzleNumber, &p.PuzzleDate, &p.FrozenAt, &p.Theme); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -378,7 +377,7 @@ func (d *DB) PuzzleHasPlays(ctx context.Context, puzzleID uuid.UUID) (bool, erro
 
 // UpdateDailyPuzzle patches mutable fields on an unplayed puzzle. Nil pointers
 // leave the field untouched. Returns ErrHasPlays if any play exists.
-func (d *DB) UpdateDailyPuzzle(ctx context.Context, n int32, mode *Mode, theme *string, date *time.Time) error {
+func (d *DB) UpdateDailyPuzzle(ctx context.Context, n int32, theme *string, date *time.Time) error {
 	p, err := d.PuzzleByNumber(ctx, n)
 	if err != nil {
 		return err
@@ -390,21 +389,16 @@ func (d *DB) UpdateDailyPuzzle(ctx context.Context, n int32, mode *Mode, theme *
 	if played {
 		return ErrHasPlays
 	}
-	if mode == nil && theme == nil && date == nil {
+	if theme == nil && date == nil {
 		return nil
 	}
 	// COALESCE keeps existing values when the corresponding arg is nil.
-	var modeArg any
-	if mode != nil {
-		modeArg = string(*mode)
-	}
 	_, err = d.Exec(ctx, `
 		UPDATE daily_puzzles
-		   SET mode  = COALESCE($2::puzzle_mode, mode),
-		       theme = COALESCE($3, theme),
-		       puzzle_date = COALESCE($4::date, puzzle_date)
+		   SET theme = COALESCE($2, theme),
+		       puzzle_date = COALESCE($3::date, puzzle_date)
 		 WHERE puzzle_number = $1
-	`, n, modeArg, theme, date)
+	`, n, theme, date)
 	return err
 }
 

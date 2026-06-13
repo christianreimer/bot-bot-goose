@@ -36,11 +36,10 @@ type importPrompt struct {
 }
 
 type importPuzzle struct {
-	PuzzleNumber int             `json:"puzzle_number"`
-	Date         string          `json:"date"` // YYYY-MM-DD UTC
-	Mode         string          `json:"mode"` // find_the_bot | find_the_human
-	Theme        string          `json:"theme,omitempty"`
-	Rounds       []importRound   `json:"rounds"`
+	PuzzleNumber int           `json:"puzzle_number"`
+	Date         string        `json:"date"` // YYYY-MM-DD UTC
+	Theme        string        `json:"theme,omitempty"`
+	Rounds       []importRound `json:"rounds"`
 }
 
 type importRound struct {
@@ -92,7 +91,6 @@ func runImport(ctx context.Context, log *slog.Logger) error {
 			puzzleStats = append(puzzleStats, map[string]any{
 				"puzzle_number": p.PuzzleNumber,
 				"date":          p.Date,
-				"mode":          p.Mode,
 				"rounds":        len(p.Rounds),
 			})
 		}
@@ -166,9 +164,6 @@ func applyImportDoc(ctx context.Context, d *db.DB, log *slog.Logger, doc *import
 // validatePuzzleShape is the dry-run check — it mirrors the validation done
 // inside importOnePuzzle, but doesn't need a live DB connection.
 func validatePuzzleShape(p importPuzzle, validArchetypes map[string]bool) error {
-	if p.Mode != "find_the_bot" && p.Mode != "find_the_human" {
-		return fmt.Errorf("bad mode %q", p.Mode)
-	}
 	if len(p.Rounds) != 3 {
 		return fmt.Errorf("want 3 rounds, got %d", len(p.Rounds))
 	}
@@ -176,7 +171,7 @@ func validatePuzzleShape(p importPuzzle, validArchetypes map[string]bool) error 
 		return fmt.Errorf("bad date: %w", err)
 	}
 	for ri, r := range p.Rounds {
-		if err := validateRound(p.Mode, ri, r); err != nil {
+		if err := validateRound(ri, r); err != nil {
 			return err
 		}
 		for _, b := range r.Bots {
@@ -189,9 +184,6 @@ func validatePuzzleShape(p importPuzzle, validArchetypes map[string]bool) error 
 }
 
 func importOnePuzzle(ctx context.Context, d *db.DB, log *slog.Logger, arche map[string]uuid.UUID, p importPuzzle) error {
-	if p.Mode != "find_the_bot" && p.Mode != "find_the_human" {
-		return fmt.Errorf("bad mode %q", p.Mode)
-	}
 	if len(p.Rounds) != 3 {
 		return fmt.Errorf("want 3 rounds, got %d", len(p.Rounds))
 	}
@@ -204,25 +196,20 @@ func importOnePuzzle(ctx context.Context, d *db.DB, log *slog.Logger, arche map[
 		theme = &p.Theme
 	}
 
-	puzzleID, err := d.InsertDailyPuzzle(ctx, int32(p.PuzzleNumber), date, db.Mode(p.Mode), theme)
+	puzzleID, err := d.InsertDailyPuzzle(ctx, int32(p.PuzzleNumber), date, theme)
 	if err != nil {
 		return fmt.Errorf("insert puzzle: %w", err)
 	}
 
-	targetKind := "bot"
-	if p.Mode == "find_the_human" {
-		targetKind = "human"
-	}
-
 	for ri, r := range p.Rounds {
-		if err := validateRound(p.Mode, ri, r); err != nil {
+		if err := validateRound(ri, r); err != nil {
 			return err
 		}
 		promptID, err := d.UpsertPrompt(ctx, r.Prompt)
 		if err != nil {
 			return fmt.Errorf("round %d prompt: %w", ri, err)
 		}
-		roundID, err := d.InsertPuzzleRound(ctx, puzzleID, int16(ri), promptID, targetKind, 1)
+		roundID, err := d.InsertPuzzleRound(ctx, puzzleID, int16(ri), promptID, 1)
 		if err != nil {
 			return fmt.Errorf("round %d insert: %w", ri, err)
 		}
@@ -261,19 +248,13 @@ func importOnePuzzle(ctx context.Context, d *db.DB, log *slog.Logger, arche map[
 			return fmt.Errorf("round %d replace: %w", ri, err)
 		}
 	}
-	log.Info("imported puzzle", "n", p.PuzzleNumber, "date", p.Date, "mode", p.Mode)
+	log.Info("imported puzzle", "n", p.PuzzleNumber, "date", p.Date)
 	return nil
 }
 
-func validateRound(mode string, idx int, r importRound) error {
-	if mode == "find_the_bot" {
-		if len(r.Bots) != 1 || len(r.Decoys) != 3 {
-			return fmt.Errorf("round %d: find_the_bot wants 1 bot + 3 decoys, got %d/%d", idx, len(r.Bots), len(r.Decoys))
-		}
-	} else {
-		if len(r.Bots) != 3 || len(r.Decoys) != 1 {
-			return fmt.Errorf("round %d: find_the_human wants 3 bots + 1 decoy, got %d/%d", idx, len(r.Bots), len(r.Decoys))
-		}
+func validateRound(idx int, r importRound) error {
+	if len(r.Bots) != 1 || len(r.Decoys) != 3 {
+		return fmt.Errorf("round %d: wants 1 bot + 3 decoys, got %d/%d", idx, len(r.Bots), len(r.Decoys))
 	}
 	if len(r.Prompt) == 0 {
 		return fmt.Errorf("round %d: prompt empty", idx)

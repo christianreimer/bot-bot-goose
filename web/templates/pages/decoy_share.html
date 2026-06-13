@@ -1,10 +1,10 @@
 {{ template "base.html" . }}
 
-{{ define "title" }}Decoy report{{ end }}
+{{ define "title" }}Line report{{ end }}
 
 {{ define "og" }}
-  <meta property="og:title" content="Could you have caught this?" />
-  <meta property="og:description" content="A human-written answer that {{ .RawPct }}% of players thought was a bot. Play Bot Bot Goose." />
+  <meta property="og:title" content="A human wrote this. Read it again." />
+  <meta property="og:description" content="A human-written answer that {{ .RealestRawPct }}% of players picked as the most human. Play Bot Bot Goose." />
   <meta property="og:url" content="{{ .ShareURL }}" />
   <meta property="og:image" content="{{ .OGImageURL }}" />
   <meta property="og:image:width" content="1200" />
@@ -22,11 +22,11 @@
   <div class="stage">
     <div class="me-header me-header-tight">
       <div class="page-mark">🪶</div>
-      <div class="verdict">A human wrote this. Could you have caught it?</div>
+      <div class="verdict">A human wrote this. Did it read more human than the rest?</div>
     </div>
 
     <div class="decoy-report">
-      <span class="kicker">Decoy report</span>
+      <span class="kicker">Line report</span>
       <h1 class="prompt-headline">{{ .PromptText }}</h1>
       <div class="decoy-answer">{{ .DecoyText }}</div>
       <div class="decoy-byline">by <b>{{ .Author }}</b></div>
@@ -35,31 +35,34 @@
         <div class="payoff-headline" style="margin-top:14px;">
           🪶 In review. Stats appear once it goes live.
         </div>
-      {{ else if eq .TotalImp 0 }}
+      {{ else if eq .RealestImp 0 }}
         <div class="payoff-headline" style="margin-top:14px;">
-          🪶 Live. Awaiting its first impressions.
+          🪶 Live. Awaiting its first votes.
         </div>
-      {{ else if lt .RawPct 15 }}
+      {{ else if lt .RealestRawPct 20 }}
         <div class="payoff-headline" style="margin-top:14px;">
-          🧑 Too human. Only <b>{{ .RawPct }}%</b> thought it was a bot.
+          🧑 Reads quiet. Only <b>{{ .RealestRawPct }}%</b> picked it as the most human.
         </div>
         <div class="payoff-stats">
-          <div><span class="n">{{ .TotalImp }}</span><span class="l">impressions</span></div>
-          <div><span class="n">{{ .TotalPicked }}</span><span class="l">accused</span></div>
+          <div><span class="n">{{ .RealestImp }}</span><span class="l">votes seen</span></div>
+          <div><span class="n">{{ .RealestVotes }}</span><span class="l">picked it</span></div>
         </div>
       {{ else }}
         <div class="payoff-headline" style="margin-top:14px;">
-          🤖 <b>{{ .RawPct }}%</b> of humans thought this was a bot.
+          🪶 <b>{{ .RealestRawPct }}%</b> picked this as the most human.
         </div>
         <div class="payoff-stats">
-          <div><span class="n">{{ .TotalPicked }}</span><span class="l">fooled</span></div>
-          <div><span class="n">{{ .TotalImp }}</span><span class="l">impressions</span></div>
+          <div><span class="n">{{ .RealestVotes }}</span><span class="l">votes</span></div>
+          <div><span class="n">{{ .RealestImp }}</span><span class="l">votes seen</span></div>
           {{ if .Rank }}
             <div><span class="n">#{{ .Rank }}</span><span class="l">of {{ .OfTotal }} forgers</span></div>
           {{ end }}
         </div>
         {{ if .Tier }}
-          <div class="payoff-tier"><b>{{ .Tier }}</b> tier · baseline {{ .BaselinePct }}% · +{{ .BeyondChance }} beyond chance</div>
+          <div class="payoff-tier"><b>{{ .Tier }}</b> tier · baseline {{ .RealestBaselinePct }}% · +{{ .RealestBeyond }} beyond chance</div>
+        {{ end }}
+        {{ if and (gt .FoolImp 0) (gt .FoolRawPct 0) }}
+          <div class="payoff-tier muted">🤖 Also fooled {{ .FoolRawPct }}% ({{ .FoolPicked }} of {{ .FoolImp }} called it a bot).</div>
         {{ end }}
       {{ end }}
 

@@ -5,7 +5,7 @@
   const state = JSON.parse(stateEl.textContent);
 
   const verdictEl = document.getElementById('verdict');
-  if (verdictEl) verdictEl.textContent = verdictFor(state.outcomes, state.mode);
+  if (verdictEl) verdictEl.textContent = verdictFor(state.outcomes);
 
   const btn = document.getElementById('shareBtn');
   if (btn) {
@@ -14,8 +14,7 @@
     // bubble copy; the URL is the part that unfurls.
     const url = btn.dataset.shareUrl || window.location.origin;
     const pct = scorePctFromOutcomes(state.outcomes);
-    const label = state.mode === 'find_the_human' ? 'Human-Dar' : 'Bot-Dar';
-    const bubble = `${label} ${pct}% · Bot Bot Goose`;
+    const bubble = `Bot-Dar ${pct}% · Bot Bot Goose`;
     btn.onclick = async () => {
       const result = await window.bbgShare(bubble, url);
       const t = document.getElementById('toast');
@@ -67,8 +66,8 @@
         const meta = document.getElementById('decoyHint');
         if (meta) meta.textContent = 'Queued for review.';
         const shareUrl = body && body.share_url ? body.share_url : '/me';
-        submitBtn.replaceWith(plantedOk('✓ Planted. ', 'See your decoy ▸', shareUrl));
-        flash('Decoy planted 🪶');
+        submitBtn.replaceWith(plantedOk('✓ Planted. ', 'See your line ▸', shareUrl));
+        flash('Line planted 🪶');
         return;
       }
 
@@ -135,13 +134,12 @@
     toastTimer = setTimeout(() => t.classList.remove('show'), 2700);
   }
 
-  function verdictFor(outs, mode) {
+  function verdictFor(outs) {
     const caught = (outs || []).filter(o => o !== 'red').length;
     const perfect = (outs || []).every(o => o === 'green');
-    const targetWord = mode === 'find_the_human' ? 'human' : 'goose';
-    if (perfect) return `Flawless. The ${targetWord === 'human' ? 'humans' : 'bots'} fear you.`;
-    if (caught === 3) return `Caught every ${targetWord}. A hint or two slipped in.`;
-    if (caught === 2) return `Two of three. The ${targetWord === 'human' ? 'humans' : 'bots'} are getting good.`;
+    if (perfect) return `Flawless. The bots fear you.`;
+    if (caught === 3) return `Caught every goose. A hint or two slipped in.`;
+    if (caught === 2) return `Two of three. The bots are getting good.`;
     if (caught === 1) return `One catch. Honk back harder tomorrow.`;
     return `Swept. It happens to everyone once.`;
   }

@@ -16,25 +16,18 @@ func TestGridIsSpoilerFree(t *testing.T) {
 	}
 }
 
-func TestCardCarriesModeIcon(t *testing.T) {
-	bot := Card(42, []game.Outcome{game.Green, game.Green, game.Green}, game.FindTheBot, 5, "https://botbotgoose.fun/")
-	if !strings.Contains(bot, IconFindBot) {
-		t.Errorf("find_the_bot card missing 🪿: %q", bot)
+func TestCardCarriesBrandIcon(t *testing.T) {
+	c := Card(42, []game.Outcome{game.Green, game.Green, game.Green}, 5, "https://botbotgoose.fun/")
+	if !strings.Contains(c, IconFindBot) {
+		t.Errorf("card missing 🪿: %q", c)
 	}
-	if !strings.Contains(bot, "Bot-Dar") {
-		t.Errorf("find_the_bot card missing Bot-Dar label")
-	}
-	human := Card(42, []game.Outcome{game.Green, game.Green, game.Green}, game.FindTheHuman, 5, "https://botbotgoose.fun/")
-	if !strings.Contains(human, IconFindHuman) {
-		t.Errorf("find_the_human card missing 🧍: %q", human)
-	}
-	if !strings.Contains(human, "Human-Dar") {
-		t.Errorf("find_the_human card missing Human-Dar label")
+	if !strings.Contains(c, "Bot-Dar") {
+		t.Errorf("card missing Bot-Dar label")
 	}
 }
 
 func TestCardIncludesScoreAndStreak(t *testing.T) {
-	c := Card(7, []game.Outcome{game.Green, game.Yellow, game.Red}, game.FindTheBot, 12, "botbotgoose.fun")
+	c := Card(7, []game.Outcome{game.Green, game.Yellow, game.Red}, 12, "botbotgoose.fun")
 	if !strings.Contains(c, "66%") {
 		t.Errorf("missing 66%% score: %q", c)
 	}

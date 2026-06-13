@@ -50,12 +50,12 @@ func main() {
 	}
 
 	// v1 stub: print a generic share card. A real OG image would draw the
-	// grid + brand mark on a 1200x630 canvas. Sample outcomes (all green) so
+	// grid + brand mark on a 1200x630 canvas. Sample outcomes (mixed) so
 	// the layout is visible even before any plays exist.
 	sample := []game.Outcome{game.Green, game.Yellow, game.Red}
-	card := share.Card(p.PuzzleNumber, sample, game.Mode(p.Mode), 0, "botbotgoose.fun")
+	card := share.Card(p.PuzzleNumber, sample, 0, "botbotgoose.fun")
 	fmt.Println(card)
-	log.Info("stub render", "puzzle", p.PuzzleNumber, "mode", p.Mode)
+	log.Info("stub render", "puzzle", p.PuzzleNumber)
 }
 
 func envDefault(k, def string) string {

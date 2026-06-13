@@ -1,4 +1,4 @@
-// Package share renders the spoiler-free, mode-aware share artifact.
+// Package share renders the spoiler-free share artifact.
 //
 // The share grid is the only free acquisition channel (design doc §2,
 // §6). It must:
@@ -16,12 +16,9 @@ import (
 	"github.com/christianreimer/bot-bot-goose/internal/game"
 )
 
-const (
-	// Mode-icon prefixes used on share cards. They differentiate the two
-	// modes visually without spoiling which answer was the target.
-	IconFindBot   = "🪿"
-	IconFindHuman = "🧍"
-)
+// IconFindBot is the goose mark that prefixes every share card. The game is
+// single-mode: three humans, one bot, tap the bot.
+const IconFindBot = "🪿"
 
 // EmojiFor maps an outcome to its share-grid cell.
 func EmojiFor(o game.Outcome) string {
@@ -36,8 +33,7 @@ func EmojiFor(o game.Outcome) string {
 	return "⬜"
 }
 
-// Grid is the emoji-only line. Same vocabulary in both modes so grids
-// stay visually comparable across the inversion.
+// Grid is the emoji-only line.
 func Grid(outcomes []game.Outcome) string {
 	var sb strings.Builder
 	for _, o := range outcomes {
@@ -46,48 +42,43 @@ func Grid(outcomes []game.Outcome) string {
 	return sb.String()
 }
 
-// Card is the full multi-line share string. The "Daily Goose" name is
-// the brand line and stays constant across modes; the mode inversion
-// is signalled by the stat label (Bot-Dar vs Human-Dar) and the icon.
-func Card(puzzleNumber int32, outcomes []game.Outcome, mode game.Mode, streak int, baseURL string) string {
+// Card is the full multi-line share string.
+func Card(puzzleNumber int32, outcomes []game.Outcome, streak int, baseURL string) string {
 	pct := game.ScorePct(outcomes)
-	icon := IconFindBot
-	const title = "Daily Goose"
-	statLabel := "Bot-Dar"
-	target := "Goose"
-	if mode == game.FindTheHuman {
-		icon = IconFindHuman
-		statLabel = "Human-Dar"
-		target = "Human"
-	}
 	// 0/3 sweep is not a success. Prefix the score line so the share text
 	// states the outcome honestly rather than reading like a bare stat.
-	scoreLine := fmt.Sprintf("%s %d%%  ·  🔥%d", statLabel, pct, streak)
+	scoreLine := fmt.Sprintf("Bot-Dar %d%%  ·  🔥%d", pct, streak)
 	if pct == 0 {
-		scoreLine = fmt.Sprintf("%s got away  ·  %s 0%%  ·  🔥%d", target, statLabel, streak)
+		scoreLine = fmt.Sprintf("Goose got away  ·  Bot-Dar 0%%  ·  🔥%d", streak)
 	}
 	// Full URL (with scheme) so iMessage/WhatsApp/etc. auto-detect it and
 	// can render a rich preview from the og:image at /r/<short>/og.png.
-	return fmt.Sprintf("%s %s #%03d\n%s\n%s\n%s",
-		icon, title, puzzleNumber, Grid(outcomes), scoreLine, withScheme(baseURL))
+	return fmt.Sprintf("%s Daily Goose #%03d\n%s\n%s\n%s",
+		IconFindBot, puzzleNumber, Grid(outcomes), scoreLine, withScheme(baseURL))
 }
 
-// DecoyReport is the per-decoy share artifact from design doc §4 — the
-// SECOND viral surface alongside the play grid. It carries an "I'm a bot
-// (compliment)" identity flex when the decoy is fooling people, and a
-// warm "too human" reframe when it's not.
+// DecoyReport is the per-decoy share artifact — the second viral surface
+// alongside the play grid. The flex is now "most human": when other players
+// pick your decoy after the reveal, you read more human than the actual
+// humans did. Fool-rate stays as a flavor line.
 type DecoyReport struct {
-	Text         string  // the decoy answer itself, in quotes
-	RawPct       int     // 0..100; raw fool rate
-	Impressions  int64
-	Fooled       int64
-	BeyondChance int     // forger points, design §4
-	Eligible     bool    // crossed the leaderboard impressions gate
-	Rank         int     // 0 if not eligible
-	OfTotal      int     // total eligible forgers
-	Tier         string  // current tier label
-	Status       string  // 'pending' | 'approved' | 'rejected' | 'retired'
-	ShareURL     string  // standalone /d/<short> URL; falls back to baseURL host if empty
+	Text string // the decoy answer itself, in quotes
+	// Realest (primary).
+	RealestRawPct      int   // 0..100; raw most-human vote rate
+	RealestImpressions int64 // times shown in a votable round
+	RealestVotes       int64 // votes earned
+	RealestBeyond      int   // votes above baseline (1/3)
+	// Fool (flavor, displayed only when non-trivial).
+	FoolImpressions int64
+	FoolPicked      int64
+	FoolRawPct      int
+	// Standings.
+	Eligible bool   // crossed the leaderboard realest-impressions gate
+	Rank     int    // 0 if not eligible
+	OfTotal  int    // total eligible forgers
+	Tier     string // current tier label (Decoy → The Realest)
+	Status   string // 'pending' | 'approved' | 'rejected' | 'retired'
+	ShareURL string // standalone /d/<short> URL; falls back to baseURL host if empty
 }
 
 // DecoyReportCard renders the share artifact text. Variant is picked off the
@@ -104,25 +95,28 @@ func DecoyReportCard(rep DecoyReport, baseURL string) string {
 	}
 	switch {
 	case rep.Status == "pending":
-		// Anticipation copy from §4 payoff loop beat 1.
-		return fmt.Sprintf("🪿 Bot Bot Goose · Decoy Report\n%q\n\n🪶 Planted. Goes live after review. We'll tell you how many you fool.\n%s",
+		return fmt.Sprintf("🪿 Bot Bot Goose · Line Report\n%q\n\n🪶 Planted. Goes live after review. We'll tell you how human you read.\n%s",
 			rep.Text, url)
 	case rep.Status == "rejected", rep.Status == "retired":
-		return fmt.Sprintf("🪿 Bot Bot Goose · Decoy Report\n%q\n\nretired\n%s",
+		return fmt.Sprintf("🪿 Bot Bot Goose · Line Report\n%q\n\nretired\n%s",
 			rep.Text, url)
-	case rep.Impressions == 0:
-		return fmt.Sprintf("🪿 Bot Bot Goose · Decoy Report\n%q\n\n🪶 Live. Waiting for its first impressions.\n%s",
+	case rep.RealestImpressions == 0:
+		return fmt.Sprintf("🪿 Bot Bot Goose · Line Report\n%q\n\n🪶 Live. Waiting for its first votes.\n%s",
 			rep.Text, url)
-	case rep.RawPct < 15:
-		// §4 flop copy: warm reframe, not punishing.
-		return fmt.Sprintf("🪿 Bot Bot Goose · Decoy Report\n%q\n\n🧑 Too human. Only %d%% thought I was a bot.\nOut of %d impressions, you're unmistakably one of us.\n%s",
-			rep.Text, rep.RawPct, rep.Impressions, url)
+	case rep.RealestRawPct < 20:
+		// Below chance (33%) by a wide margin. Warm reframe, not punishing.
+		return fmt.Sprintf("🪿 Bot Bot Goose · Line Report\n%q\n\n🧑 Reads quiet. Only %d%% picked it as the most human.\nOut of %d rounds, the room kept looking elsewhere.\n%s",
+			rep.Text, rep.RealestRawPct, rep.RealestImpressions, url)
 	default:
-		// §4 payoff card.
-		main := fmt.Sprintf("🪿 Bot Bot Goose · Decoy Report\n%q\n\n🤖 %d%% of humans think I'm a bot · %d fooled",
-			rep.Text, rep.RawPct, rep.Fooled)
-		if rep.BeyondChance > 0 {
-			main += fmt.Sprintf(" · +%d beyond chance", rep.BeyondChance)
+		// Payoff card.
+		main := fmt.Sprintf("🪿 Bot Bot Goose · Line Report\n%q\n\n🪶 %d%% picked it as the most human · %d votes",
+			rep.Text, rep.RealestRawPct, rep.RealestVotes)
+		if rep.RealestBeyond > 0 {
+			main += fmt.Sprintf(" · +%d beyond chance", rep.RealestBeyond)
+		}
+		if rep.FoolImpressions > 0 && rep.FoolRawPct > 0 {
+			main += fmt.Sprintf("\n🤖 Also fooled %d%% (%d of %d called it a bot)",
+				rep.FoolRawPct, rep.FoolPicked, rep.FoolImpressions)
 		}
 		if rep.Eligible && rep.Rank > 0 {
 			main += fmt.Sprintf("\nRank #%d of %d forgers · %s", rep.Rank, rep.OfTotal, rep.Tier)

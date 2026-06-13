@@ -7,18 +7,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// Re-export game's value types so callers can pass them through this package
+// Re-export game's outcome type so callers can pass it through this package
 // without an extra import. The DB layer is otherwise free of domain
-// dependencies; these aliases stay narrow.
-type (
-	Mode    = game.Mode
-	Outcome = game.Outcome
-)
-
-const (
-	ModeFindBot   = game.FindTheBot
-	ModeFindHuman = game.FindTheHuman
-)
+// dependencies; this alias stays narrow.
+type Outcome = game.Outcome
 
 type ContentKind string
 
@@ -53,7 +45,6 @@ type DailyPuzzle struct {
 	ID           uuid.UUID
 	PuzzleNumber int32
 	PuzzleDate   time.Time
-	Mode         Mode
 	FrozenAt     time.Time
 	Theme        *string
 }
@@ -64,7 +55,6 @@ type PuzzleRound struct {
 	RoundIndex    int16
 	PromptID      uuid.UUID
 	PromptText    string
-	TargetKind    string // 'bot' or 'human' — what the player hunts
 	TargetCount   int16
 }
 

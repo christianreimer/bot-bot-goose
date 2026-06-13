@@ -41,14 +41,13 @@ func randInt(n int) int {
 // hydrate. It MUST NOT contain any field that reveals which answer is the
 // target — that's the whole point of server authority.
 type playPageState struct {
-	PuzzleNumber int32           `json:"puzzle_number"`
-	Mode         string          `json:"mode"`
-	PlayID       string          `json:"play_id"`
-	Round        *clientRound    `json:"round"`
-	Outcomes     []game.Outcome  `json:"outcomes"`
-	Completed    bool            `json:"completed"`
-	Streak       int             `json:"streak"`
-	BaseURL      string          `json:"base_url"`
+	PuzzleNumber int32          `json:"puzzle_number"`
+	PlayID       string         `json:"play_id"`
+	Round        *clientRound   `json:"round"`
+	Outcomes     []game.Outcome `json:"outcomes"`
+	Completed    bool           `json:"completed"`
+	Streak       int            `json:"streak"`
+	BaseURL      string         `json:"base_url"`
 }
 
 // clientRound is the per-round state the player sees. No labels.
@@ -59,7 +58,6 @@ type clientRound struct {
 	Token       string   `json:"token"`
 	HintUsed    bool     `json:"hint_used"`
 	RemovedSlot *int16   `json:"removed_slot"`
-	TargetLabel string   `json:"target_label"` // "bot" or "human" — what to hunt
 }
 
 func (s *Server) handlePlayLanding(w http.ResponseWriter, r *http.Request) {
@@ -112,7 +110,7 @@ func (s *Server) renderPlayPage(w http.ResponseWriter, r *http.Request, puzzle *
 				shareURL = baseURL + "/r/" + share.PlayShortID(p.ID)
 			}
 		}
-		card := share.Card(puzzle.PuzzleNumber, outcomes, game.Mode(puzzle.Mode), state.Streak, baseURL)
+		card := share.Card(puzzle.PuzzleNumber, outcomes, state.Streak, baseURL)
 
 		// Decoy solicitation: pick a prompt to ask the player to write for.
 		// Soft-fail if none is available — the page still renders without
@@ -143,7 +141,6 @@ func (s *Server) renderPlayPage(w http.ResponseWriter, r *http.Request, puzzle *
 
 		s.renderHTML(w, http.StatusOK, "pages/result.html", map[string]any{
 			"PuzzleNumber":          puzzle.PuzzleNumber,
-			"Mode":                  string(puzzle.Mode),
 			"Outcomes":              outcomes,
 			"Grid":                  share.Grid(outcomes),
 			"ScorePct":              game.ScorePct(outcomes),
@@ -163,7 +160,6 @@ func (s *Server) renderPlayPage(w http.ResponseWriter, r *http.Request, puzzle *
 	signedIn := u != nil && u.Email != nil && *u.Email != ""
 	s.renderHTML(w, http.StatusOK, "pages/play.html", map[string]any{
 		"PuzzleNumber": puzzle.PuzzleNumber,
-		"Mode":         string(puzzle.Mode),
 		"State":        embedded,
 		"BaseURL":      baseURL,
 		"SignedIn":     signedIn,
@@ -197,7 +193,6 @@ func (s *Server) composePlayState(ctx context.Context, u *db.User, puzzle *db.Da
 
 	state := &playPageState{
 		PuzzleNumber: puzzle.PuzzleNumber,
-		Mode:         string(puzzle.Mode),
 		PlayID:       playRow.ID.String(),
 		Outcomes:     outcomes,
 		Streak:       streak,
@@ -250,10 +245,6 @@ func (s *Server) openClientRound(ctx context.Context, playRow *db.Play, round *d
 		shuffled[slot] = canonical[ordinal].AnswerText
 	}
 
-	target := "bot"
-	if round.TargetKind == "human" {
-		target = "human"
-	}
 	token := play.Issue(playRow.HMACSecret, playRow.ID, round.RoundIndex, perm, time.Now())
 	return &clientRound{
 		Index:       round.RoundIndex,
@@ -262,7 +253,6 @@ func (s *Server) openClientRound(ctx context.Context, playRow *db.Play, round *d
 		Token:       token,
 		HintUsed:    pr.HintUsed,
 		RemovedSlot: pr.RemovedSlot,
-		TargetLabel: target,
 	}, nil
 }
 
@@ -359,13 +349,16 @@ func (s *Server) handleAPIHint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	target := targetContentKind(qRound.TargetKind)
+	// Single-mode: the target is always the bot. Hint removes one
+	// non-target slot (i.e., a decoy answer) so the player picks from
+	// fewer wrong answers.
 	var wrong []int16
 	for slot, ordinal := range perm {
-		if string(canonical[ordinal].ContentKind) != target {
+		if string(canonical[ordinal].ContentKind) != "bot" {
 			wrong = append(wrong, int16(slot))
 		}
 	}
+	_ = qRound
 	if len(wrong) == 0 {
 		writeJSONErr(w, http.StatusInternalServerError, "no_wrong", "")
 		return
@@ -441,16 +434,16 @@ func (s *Server) handleAPIGuess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	target := targetContentKind(qRound.TargetKind)
-	// Compute target slots (1+) for the reveal.
+	// Single-mode: the target is always the bot answer.
 	var targetSlots []int16
 	for slot, ordinal := range perm {
-		if string(canonical[ordinal].ContentKind) == target {
+		if string(canonical[ordinal].ContentKind) == "bot" {
 			targetSlots = append(targetSlots, int16(slot))
 		}
 	}
+	_ = qRound
 	chosenOrdinal := perm[body.Slot]
-	correct := string(canonical[chosenOrdinal].ContentKind) == target
+	correct := string(canonical[chosenOrdinal].ContentKind) == "bot"
 	outcome := game.Resolve(correct, prRow.HintUsed)
 
 	if err := s.cfg.DB.CommitGuess(ctx, prRow.ID, body.Slot, db.Outcome(outcome)); err != nil {
@@ -503,13 +496,72 @@ func (s *Server) handleAPIGuess(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// targetContentKind maps a puzzle_rounds.target_kind ('bot'|'human') to
-// the matching puzzle_round_answers.content_kind ('bot'|'decoy').
-func targetContentKind(target string) string {
-	if target == "human" {
-		return "decoy"
+// ---------------------------------------------------------------------------
+// Realest vote — post-reveal "which felt most human?"
+// ---------------------------------------------------------------------------
+//
+// Mirrors the guess flow: same token verification, same loadVerified path.
+// Differences: (1) requires the round to be already committed (vote happens
+// after reveal); (2) the chosen slot must be a human decoy (the bot card is
+// not votable); (3) idempotent — re-voting on the same round overwrites the
+// previous choice, moving the vote count.
+
+type realestReq struct {
+	Token string `json:"token"`
+	Slot  int16  `json:"slot"`
+}
+
+type realestResp struct {
+	Recorded bool `json:"recorded"` // true on first vote, false on re-vote (still ok)
+}
+
+func (s *Server) handleAPIRealest(w http.ResponseWriter, r *http.Request) {
+	n, err := strconv.Atoi(chi.URLParam(r, "n"))
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "bad_round", "")
+		return
 	}
-	return "bot"
+	var body realestReq
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "bad_body", "")
+		return
+	}
+	if body.Slot < 0 || body.Slot > 31 {
+		writeJSONErr(w, http.StatusBadRequest, "bad_slot", "")
+		return
+	}
+	u := users.FromContext(r.Context())
+	ctx := r.Context()
+	now := time.Now()
+
+	_, prRow, _, perm, canonical, herr := s.loadVerified(ctx, u, body.Token, int16(n), now)
+	if herr != nil {
+		writeJSONErr(w, herr.status, herr.code, herr.msg)
+		return
+	}
+	if prRow.CommittedAt == nil {
+		// Vote is only meaningful after the reveal.
+		writeJSONErr(w, http.StatusConflict, "not_committed", "")
+		return
+	}
+	if int(body.Slot) >= len(perm) {
+		writeJSONErr(w, http.StatusBadRequest, "slot_oob", "")
+		return
+	}
+	chosen := canonical[perm[body.Slot]]
+	if string(chosen.ContentKind) != "decoy" || chosen.DecoyID == nil {
+		// Player picked the bot card (or a malformed slot). The UI shouldn't
+		// allow this, but enforce server-side too.
+		writeJSONErr(w, http.StatusBadRequest, "not_human", "")
+		return
+	}
+
+	res, err := s.cfg.DB.CastRealestVote(ctx, prRow.ID, *chosen.DecoyID)
+	if err != nil {
+		writeJSONErr(w, http.StatusInternalServerError, "vote_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, realestResp{Recorded: res.Recorded})
 }
 
 // ---------------------------------------------------------------------------

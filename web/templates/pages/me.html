@@ -32,7 +32,7 @@
       {{ end }}
     {{ end }}
 
-    <h3 class="section-h">Your decoys</h3>
+    <h3 class="section-h">Your lines</h3>
     {{ if .Decoys }}
       <div class="decoy-list">
       {{ range .Decoys }}
@@ -46,12 +46,15 @@
               <span class="pill rejected">not picked</span>
             {{ else if eq .Status "retired" }}
               <span class="pill retired">retired</span>
-            {{ else if eq .TotalImp 0 }}
-              <span class="pill live">live, awaiting impressions</span>
+            {{ else if eq .RealestImp 0 }}
+              <span class="pill live">live, awaiting votes</span>
             {{ else }}
-              <span class="pill live">{{ .RawPct }}% fool rate</span>
-              <span class="muted">· baseline {{ .BaselinePct }}% · +{{ .BeyondChance }} beyond chance</span>
-              <span class="muted">· {{ .TotalPicked }} of {{ .TotalImp }} thought you were a bot · {{ .ModeMix }}</span>
+              <span class="pill live">{{ .RealestRawPct }}% most human</span>
+              <span class="muted">· baseline {{ .RealestBaselinePct }}% · +{{ .RealestBeyond }} beyond chance</span>
+              <span class="muted">· {{ .RealestVotes }} of {{ .RealestImp }} picked you as the most human</span>
+              {{ if and (gt .FoolImp 0) (gt .FoolRawPct 0) }}
+                <span class="muted">· also fooled {{ .FoolRawPct }}% ({{ .FoolPicked }} of {{ .FoolImp }} called you a bot)</span>
+              {{ end }}
             {{ end }}
           </div>
           <div class="decoy-actions">
@@ -61,7 +64,7 @@
       {{ end }}
       </div>
     {{ else }}
-      <div class="muted empty">No decoys yet. Finish a puzzle to plant one. Your words become a future trap.</div>
+      <div class="muted empty">No lines yet. Finish a puzzle to plant one. Your words go into a future round.</div>
     {{ end }}
 
     <h3 class="section-h">Account</h3>

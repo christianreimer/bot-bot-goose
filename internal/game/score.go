@@ -12,12 +12,8 @@ const (
 )
 
 // Resolve returns the round outcome given whether the player picked the
-// target slot and whether they used a hint.
-//
-// The rule is identical in both puzzle modes: the player picks the unique
-// "odd one out" (the bot in find_the_bot, the human in find_the_human).
-// Whether the pick is correct is what matters; the mode only changes the
-// UI copy and the unified fool-rate accounting.
+// target slot and whether they used a hint. The target is always the bot:
+// three human answers, one bot, tap the bot.
 func Resolve(correct, hintUsed bool) Outcome {
 	if !correct {
 		return Red
@@ -43,30 +39,15 @@ func ScorePct(outs []Outcome) int {
 	return (caught * 100) / len(outs)
 }
 
-// Mode is duplicated here (rather than importing db) so the game package
-// stays storage-agnostic.
-type Mode string
+// Baseline is the chance-level fool rate: 1-in-4. Every prompt round shows
+// four answers and one is the bot; a player guessing at random picks any
+// given decoy 25% of the time.
+const Baseline = 0.25
 
-const (
-	FindTheBot   Mode = "find_the_bot"
-	FindTheHuman Mode = "find_the_human"
-)
-
-// BaselineFor returns the chance-level fool rate for a mode:
-//   - find_the_bot:  1-in-4 baseline (any decoy gets picked 25% of the time).
-//   - find_the_human: 3-in-4 baseline (a decoy survives 75% of the time
-//     because the player is hunting the human, not the bots).
-func BaselineFor(m Mode) float64 {
-	if m == FindTheHuman {
-		return 0.75
-	}
-	return 0.25
-}
-
-// AdjustedFoolRate shrinks the raw rate toward the mode-specific baseline
-// using a pseudo-count of k impressions at the baseline. This is what the
-// forger leaderboard ranks on — raw rate is only ever shown to the user
-// alongside the appropriate baseline line on the chart.
+// AdjustedFoolRate shrinks the raw rate toward the baseline using a
+// pseudo-count of k impressions at the baseline. This is what the forger
+// leaderboard ranks on — raw rate is only ever shown to the user alongside
+// the baseline line on the chart.
 //
 //	adjusted = (picked + k * baseline) / (impressions + k)
 //
@@ -75,15 +56,14 @@ func BaselineFor(m Mode) float64 {
 // baseline (not 0).
 const FoolRateK = 20
 
-func AdjustedFoolRate(pickedAsBot, impressions int, m Mode) float64 {
-	baseline := BaselineFor(m)
-	return (float64(pickedAsBot) + FoolRateK*baseline) / (float64(impressions) + FoolRateK)
+func AdjustedFoolRate(pickedAsBot, impressions int) float64 {
+	return (float64(pickedAsBot) + FoolRateK*Baseline) / (float64(impressions) + FoolRateK)
 }
 
 // ForgerPoints is the user-facing "how many you fooled beyond chance" stat
 // from §4. Floored at 0 — being below chance is "charmingly human", not negative.
-func ForgerPoints(pickedAsBot, impressions int, m Mode) int {
-	expected := BaselineFor(m) * float64(impressions)
+func ForgerPoints(pickedAsBot, impressions int) int {
+	expected := Baseline * float64(impressions)
 	pts := float64(pickedAsBot) - expected
 	if pts < 0 {
 		return 0

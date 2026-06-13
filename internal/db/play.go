@@ -56,15 +56,14 @@ func (d *DB) CreateOrGetPlay(ctx context.Context, userID, puzzleID uuid.UUID, hm
 // PublicPlay is the data behind /r/<short> — the public result share page.
 // Only completed plays are reachable; in-progress plays would leak state.
 type PublicPlay struct {
-	PlayID         uuid.UUID
-	UserID         uuid.UUID
-	AuthorHandle   string
-	PuzzleNumber   int32
-	Mode           Mode
-	Outcomes       []Outcome
-	ScorePct       int
-	Streak         int
-	CompletedAt    time.Time
+	PlayID       uuid.UUID
+	UserID       uuid.UUID
+	AuthorHandle string
+	PuzzleNumber int32
+	Outcomes     []Outcome
+	ScorePct     int
+	Streak       int
+	CompletedAt  time.Time
 }
 
 // PlayByShortID resolves a /r/<short> URL to its public result bundle. Only
@@ -74,7 +73,7 @@ func (d *DB) PlayByShortID(ctx context.Context, short string) (*PublicPlay, erro
 		SELECT p.id, p.user_id,
 		       CASE WHEN u.handle IS NULL OR u.handle = ''
 		            THEN '' ELSE u.handle END,
-		       dp.puzzle_number, dp.mode,
+		       dp.puzzle_number,
 		       p.score_pct, p.completed_at,
 		       COALESCE(s.current, 0)
 		  FROM plays p
@@ -87,7 +86,7 @@ func (d *DB) PlayByShortID(ctx context.Context, short string) (*PublicPlay, erro
 	`, short)
 	pp := &PublicPlay{}
 	var scorePct *int16
-	if err := row.Scan(&pp.PlayID, &pp.UserID, &pp.AuthorHandle, &pp.PuzzleNumber, &pp.Mode,
+	if err := row.Scan(&pp.PlayID, &pp.UserID, &pp.AuthorHandle, &pp.PuzzleNumber,
 		&scorePct, &pp.CompletedAt, &pp.Streak); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -281,10 +280,9 @@ func (d *DB) CompletePlay(ctx context.Context, playID uuid.UUID, scorePct int16,
 
 	// Streak update. Look up the puzzle number.
 	var puzzleNumber int32
-	var mode Mode
 	if err := tx.QueryRow(ctx, `
-		SELECT puzzle_number, mode FROM daily_puzzles WHERE id = $1
-	`, puzzleID).Scan(&puzzleNumber, &mode); err != nil {
+		SELECT puzzle_number FROM daily_puzzles WHERE id = $1
+	`, puzzleID).Scan(&puzzleNumber); err != nil {
 		return err
 	}
 	_, err = tx.Exec(ctx, `
@@ -305,14 +303,9 @@ func (d *DB) CompletePlay(ctx context.Context, playID uuid.UUID, scorePct int16,
 	}
 
 	// Decoy stats rollup. For each decoy answer in this play, increment
-	// impressions; if the player guessed that slot (i.e. picked_as_bot), bump
-	// the accusation counter for the mode.
-	//
-	// The 'picked_as_bot' interpretation per the plan:
-	//   find_the_bot:  player tapping a decoy = accusation (counts up).
-	//   find_the_human: player NOT picking the decoy = the human-author wins
-	//     (the decoy fooled them into thinking it was a bot). In this mode
-	//     'picked_as_bot' increments when the player's guess slot != decoy slot.
+	// impressions; if the player guessed that slot (accused this decoy of
+	// being the bot), bump picked_as_bot. Single-mode: every tap on a
+	// decoy is an accusation.
 	_, err = tx.Exec(ctx, `
 		WITH play_decoys AS (
 		    SELECT pra.decoy_id, pr.id AS play_round_id, pr.slot_permutation, pra.id AS answer_id
@@ -338,24 +331,18 @@ func (d *DB) CompletePlay(ctx context.Context, playID uuid.UUID, scorePct int16,
 		      JOIN plays p ON p.id = pr.play_id
 		     WHERE p.id = $1
 		)
-		INSERT INTO decoy_daily_stats (decoy_id, stat_date, mode, impressions, picked_as_bot)
+		INSERT INTO decoy_daily_stats (decoy_id, stat_date, impressions, picked_as_bot)
 		SELECT rm.decoy_id,
 		       CURRENT_DATE,
-		       $2::puzzle_mode,
 		       1,
-		       CASE WHEN $2 = 'find_the_bot' THEN
-		            -- accused iff player's slot maps to this decoy answer
-		            CASE WHEN rm.canonical[rm.slot_permutation[gfr.slot + 1] + 1] = rm.answer_id THEN 1 ELSE 0 END
-		            ELSE
-		            -- find_the_human: human-author wins when player did NOT pick the decoy
-		            CASE WHEN rm.canonical[rm.slot_permutation[gfr.slot + 1] + 1] = rm.answer_id THEN 0 ELSE 1 END
-		       END
+		       CASE WHEN rm.canonical[rm.slot_permutation[gfr.slot + 1] + 1] = rm.answer_id
+		            THEN 1 ELSE 0 END
 		  FROM round_meta rm
 		  JOIN guess_for_round gfr ON gfr.play_round_id = rm.play_round_id
-		ON CONFLICT (decoy_id, stat_date, mode) DO UPDATE
+		ON CONFLICT (decoy_id, stat_date) DO UPDATE
 		   SET impressions = decoy_daily_stats.impressions + EXCLUDED.impressions,
 		       picked_as_bot = decoy_daily_stats.picked_as_bot + EXCLUDED.picked_as_bot
-	`, playID, string(mode))
+	`, playID)
 	if err != nil {
 		return err
 	}
