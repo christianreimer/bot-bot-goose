@@ -39,6 +39,7 @@
   }
 
   render();
+  maybeShowIntro();
 
   // ---- render -------------------------------------------------------------
 
@@ -72,8 +73,13 @@
   function renderRound() {
     const r = state.round;
     const isHunt = r.target_label === 'human' ? 'human' : 'bot';
+    // First-round, not-signed-in attention pulse on the hunt-target word.
+    // Returning signed-in players already know the rule; the pulse would
+    // just be noise. Round 1 only — by round 2 they've made a guess.
+    const showHuntPulse = r.index === 0 && stage.dataset.signedIn !== '1';
+    const huntClass = showHuntPulse ? 'hunt hunt-attention' : 'hunt';
     stage.innerHTML = `
-      <div class="round-label">Round ${r.index + 1} of ${N_ROUNDS} <span class="hunt">· Tap the ${isHunt}</span></div>
+      <div class="round-label">Round ${r.index + 1} of ${N_ROUNDS} <span class="${huntClass}">· Tap the ${isHunt}</span></div>
       <div class="prompt"></div>
       <div class="answers" id="answers"></div>
       <div class="controls" id="controls"></div>`;
@@ -219,6 +225,37 @@
       throw new Error(msg);
     }
     return r.json();
+  }
+
+  // First-visit "how to play" modal. Pure client-side gate: localStorage
+  // key "bbg_seen_intro_v1" persists the dismissal. Anyone with a stale
+  // browser (cleared storage, incognito, new device) sees it again, which
+  // is acceptable for an under-1-minute primer. If storage is blocked we
+  // still show + dismiss the modal; the user just sees it next visit too.
+  function maybeShowIntro() {
+    const KEY = 'bbg_seen_intro_v1';
+    let seen = false;
+    try { seen = localStorage.getItem(KEY) === '1'; } catch (_) {}
+    if (seen) return;
+
+    const ov = document.getElementById('introOverlay');
+    if (!ov) return;
+    ov.hidden = false;
+
+    const dismiss = () => {
+      ov.hidden = true;
+      try { localStorage.setItem(KEY, '1'); } catch (_) {}
+      document.removeEventListener('keydown', onKey);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') dismiss(); };
+
+    document.getElementById('introDismiss')?.addEventListener('click', dismiss);
+    document.getElementById('introScrim')?.addEventListener('click', dismiss);
+    document.addEventListener('keydown', onKey);
+
+    // Focus the primary action so a keyboard user can press Enter to dismiss.
+    // requestAnimationFrame lets the layout settle first.
+    requestAnimationFrame(() => document.getElementById('introDismiss')?.focus());
   }
 
   let toastTimer;

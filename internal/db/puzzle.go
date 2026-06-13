@@ -649,6 +649,133 @@ func (d *DB) DeletePrompt(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// PromptSupplyRollup is the per-prompt content-readiness snapshot used by the
+// `bbg-admin prompt supply` verb. ApprovedBots / ApprovedDecoys count live
+// rows in the moderated pool; PendingDecoys counts un-decided harvest rows;
+// UsedInPuzzles lists every puzzle_number the prompt currently appears in.
+type PromptSupplyRollup struct {
+	PromptID       uuid.UUID
+	PromptText     string
+	ApprovedBots   int
+	ApprovedDecoys int
+	PendingDecoys  int
+	UsedInPuzzles  []int32
+}
+
+// PromptSupplyCounts returns one rollup per non-retired prompt. Used to spot
+// which prompts are ready for a given mode (find_the_bot needs ≥4 decoys;
+// find_the_human needs ≥3 bots + ≥1 decoy) and which are already burned by
+// the upcoming schedule.
+func (d *DB) PromptSupplyCounts(ctx context.Context) ([]PromptSupplyRollup, error) {
+	const q = `
+		SELECT
+		  p.id,
+		  p.text,
+		  (SELECT COUNT(*) FROM bot_candidates b
+		    WHERE b.prompt_id = p.id AND b.status = 'approved')                AS approved_bots,
+		  (SELECT COUNT(*) FROM decoy_submissions ds
+		    WHERE ds.prompt_id = p.id AND ds.status = 'approved'
+		      AND ds.deleted_at IS NULL)                                       AS approved_decoys,
+		  (SELECT COUNT(*) FROM pre_launch_submissions pls
+		    WHERE pls.prompt_id = p.id
+		      AND pls.ingested_decoy_id IS NULL
+		      AND pls.rejected_at IS NULL)                                     AS pending_decoys,
+		  COALESCE(ARRAY(
+		    SELECT dp.puzzle_number
+		      FROM puzzle_rounds pr
+		      JOIN daily_puzzles dp ON dp.id = pr.daily_puzzle_id
+		     WHERE pr.prompt_id = p.id
+		     ORDER BY dp.puzzle_number
+		  ), '{}'::int[])                                                      AS used_in_puzzles
+		FROM prompts p
+		WHERE p.retired_at IS NULL
+		ORDER BY p.text`
+	rows, err := d.Query(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PromptSupplyRollup
+	for rows.Next() {
+		var r PromptSupplyRollup
+		if err := rows.Scan(
+			&r.PromptID, &r.PromptText,
+			&r.ApprovedBots, &r.ApprovedDecoys, &r.PendingDecoys, &r.UsedInPuzzles,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// PuzzlePlayCount returns how many plays reference the puzzle.
+func (d *DB) PuzzlePlayCount(ctx context.Context, puzzleID uuid.UUID) (int, error) {
+	var n int
+	err := d.QueryRow(ctx, `SELECT COUNT(*) FROM plays WHERE daily_puzzle_id = $1`, puzzleID).Scan(&n)
+	return n, err
+}
+
+// FirstRoundPromptText returns the round-0 prompt text for a puzzle. Returns
+// ErrNotFound when the puzzle has no rounds yet (newly created, not composed).
+func (d *DB) FirstRoundPromptText(ctx context.Context, puzzleID uuid.UUID) (string, error) {
+	var text string
+	err := d.QueryRow(ctx, `
+		SELECT p.text
+		  FROM puzzle_rounds pr
+		  JOIN prompts p ON p.id = pr.prompt_id
+		 WHERE pr.daily_puzzle_id = $1
+		 ORDER BY pr.round_index
+		 LIMIT 1
+	`, puzzleID).Scan(&text)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", err
+	}
+	return text, nil
+}
+
+// DeleteDailyPuzzleAndPlays force-removes a puzzle even when plays reference
+// it. Plays (and their cascading play_rounds + play_guesses) are deleted
+// first, then the puzzle row itself (cascade drops rounds + answers). The
+// whole thing runs in a single transaction; returns the number of plays
+// that were destroyed so the caller can echo it back to the operator.
+//
+// This is the destructive variant of DeleteDailyPuzzle — use only when the
+// operator has explicitly accepted the loss of play data (e.g. via the
+// `puzzle replace` verb, which wraps this delete with an immediate import).
+func (d *DB) DeleteDailyPuzzleAndPlays(ctx context.Context, n int32) (playsDeleted int, err error) {
+	tx, err := d.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var puzzleID uuid.UUID
+	if err := tx.QueryRow(ctx,
+		`SELECT id FROM daily_puzzles WHERE puzzle_number = $1`, n,
+	).Scan(&puzzleID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, ErrNotFound
+		}
+		return 0, err
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM plays WHERE daily_puzzle_id = $1`, puzzleID)
+	if err != nil {
+		return 0, err
+	}
+	playsDeleted = int(tag.RowsAffected())
+	if _, err := tx.Exec(ctx, `DELETE FROM daily_puzzles WHERE puzzle_number = $1`, n); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return playsDeleted, nil
+}
+
 // UserIDByEmail resolves a user by email, used to map --reviewer-email flags
 // to moderation_reviews.reviewer_user_id (which is NOT NULL).
 func (d *DB) UserIDByEmail(ctx context.Context, email string) (uuid.UUID, error) {

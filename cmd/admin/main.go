@@ -10,10 +10,10 @@
 //
 // Content-management groups (agent-operable — JSON stdout, --table opt-in):
 //
-//	bbg-admin puzzle  <list|show|create|compose|edit|set-round|set-answer|delete|schedule>
+//	bbg-admin puzzle  <list|show|create|compose|edit|set-round|set-answer|delete|replace|schedule>
 //	bbg-admin decoy   <list|show|review|bulk-review>
 //	bbg-admin bot     <list|show|review|bulk-review>
-//	bbg-admin prompt  <list|show|create|edit|retire|delete>
+//	bbg-admin prompt  <list|show|create|edit|retire|delete|supply>
 //	bbg-admin harvest <list|show|review|bulk-review|prompts>
 //	bbg-admin stats   <overview|players|decoys|harvest>
 //
@@ -80,12 +80,12 @@ func usage() {
              --email=user@example.com --role=reviewer
   vapid-gen  Print a fresh VAPID key pair for BBG_VAPID_*.
   import     Load a content JSON file (prompts + bots + decoys + puzzles).
-             bbg-admin import path/to/content.json
+             bbg-admin import [--dry-run] path/to/content.json
   rollup     Recompute forger_rankings from decoy_daily_stats. Nightly cron target.
-  puzzle     Manage daily puzzles (list/show/create/compose/edit/set-round/set-answer/delete/schedule).
+  puzzle     Manage daily puzzles (list/show/create/compose/edit/set-round/set-answer/delete/replace/schedule).
   decoy      Manage user-submitted answers (list/show/review/bulk-review).
   bot        Manage LLM-generated bot candidates (list/show/review/bulk-review).
-  prompt     Manage prompts (list/show/create/edit/retire/delete).
+  prompt     Manage prompts (list/show/create/edit/retire/delete/supply).
   harvest    Review /harvest submissions in pre_launch_submissions (list/show/review/bulk-review/prompts).
   stats      Usage reporting (overview/players/decoys/harvest).
 

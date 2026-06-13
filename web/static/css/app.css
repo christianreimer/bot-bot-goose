@@ -89,6 +89,18 @@ header{
 
 .round-label{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);text-align:center;margin-bottom:10px;}
 .round-label .hunt{color:var(--honk);font-weight:700;}
+/* First-round attention pulse on the hunt-target word, shown only to
+   anonymous users (signed-in returning players already know the rule).
+   Three cycles after a brief settle delay, then it parks at scale(1).
+   inline-block is required for transform on inline content. */
+.round-label .hunt.hunt-attention{
+  display:inline-block;transform-origin:center;
+  animation:huntAttention 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.6s 3 both;
+}
+@keyframes huntAttention{
+  0%, 100%{transform:scale(1);text-shadow:none;}
+  50%{transform:scale(1.16);text-shadow:0 0 10px rgba(244,162,59,.55);}
+}
 .prompt{font-family:var(--display);font-weight:700;font-size:24px;line-height:1.22;letter-spacing:-.02em;text-align:center;margin-bottom:18px;}
 
 .answers{display:flex;flex-direction:column;gap:14px;}
@@ -372,6 +384,54 @@ footer small{color:var(--muted);font-family:var(--mono);font-size:11px;}
 
 @media (prefers-reduced-motion: reduce){
   .overlay-card{animation:none;}
+}
+
+/* First-visit "How to play" modal. Reveal/dismiss is driven by play.js
+   (localStorage key bbg_seen_intro_v1). Scrim fades, card eases in
+   from a small offset. Reuses the editorial honk-stripe-on-top so the
+   surface reads as part of the system, not a foreign popup. */
+.intro-overlay{
+  position:fixed;inset:0;z-index:100;
+  display:flex;align-items:center;justify-content:center;
+  padding:24px;
+}
+.intro-overlay[hidden]{display:none;}
+.intro-scrim{
+  position:absolute;inset:0;
+  background:rgba(14,26,32,.78);
+  animation:introFade 240ms ease-out both;
+}
+.intro-card{
+  position:relative;z-index:1;
+  background:var(--surface);
+  border:1px solid var(--line);border-top:2px solid var(--honk);
+  border-radius:16px;
+  padding:24px 22px 20px;
+  width:100%;max-width:440px;
+  text-align:left;
+  animation:introIn 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.intro-mark{font-size:34px;line-height:1;text-align:center;margin-bottom:10px;filter:drop-shadow(0 2px 5px rgba(0,0,0,.4));}
+.intro-title{
+  font-family:var(--display);font-weight:800;font-size:22px;letter-spacing:-.02em;
+  color:var(--ink);text-align:center;margin-bottom:14px;
+}
+.intro-body{
+  font-family:var(--body);font-size:14px;line-height:1.55;color:var(--ink);
+  margin-bottom:10px;
+}
+.intro-aside{
+  font-family:var(--body);font-size:13px;line-height:1.5;color:var(--muted);
+  margin-top:6px;
+}
+.intro-card .controls{margin-top:18px;}
+@keyframes introFade{from{opacity:0;}to{opacity:1;}}
+@keyframes introIn{
+  from{opacity:0;transform:translateY(10px) scale(.97);}
+  to{opacity:1;transform:none;}
+}
+@media (prefers-reduced-motion: reduce){
+  .intro-scrim,.intro-card{animation:none;}
 }
 
 /* Planted: the persistent post-submit state. The card stays in its grid

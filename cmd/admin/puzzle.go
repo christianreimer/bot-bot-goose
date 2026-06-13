@@ -42,6 +42,8 @@ func runPuzzle(ctx context.Context, log *slog.Logger) error {
 		return puzzleSetAnswer(ctx, log)
 	case "delete":
 		return puzzleDelete(ctx, log)
+	case "replace":
+		return puzzleReplace(ctx, log)
 	case "schedule":
 		return puzzleSchedule(ctx, log)
 	default:
@@ -61,6 +63,7 @@ func puzzleUsage() {
   set-round  Set or replace one round's prompt + re-pick its answers.
   set-answer Override one answer's text snapshot (slot 0..3).
   delete     Delete an unplayed puzzle.
+  replace    DESTRUCTIVE: delete a puzzle (incl. its plays) and re-import from JSON. Requires --content + --confirm-plays.
   schedule   Loop `+"`compose`"+` for N consecutive days, skipping existing dates.`)
 }
 
@@ -102,14 +105,56 @@ func puzzleList(ctx context.Context, log *slog.Logger) error {
 	if err != nil {
 		return emitError("db", err.Error(), nil)
 	}
-	if *asTable {
-		rows := make([][]any, 0, len(puzzles))
-		for _, p := range puzzles {
-			rows = append(rows, []any{p.PuzzleNumber, p.PuzzleDate.Format("2006-01-02"), p.Mode, derefOr(p.Theme, "-")})
-		}
-		return emitTable([]string{"NUMBER", "DATE", "MODE", "THEME"}, rows)
+	// Enrich each row with plays count and round-0 prompt preview. These are
+	// cheap per-row lookups and the list is bounded by --limit (default 50).
+	type listRow struct {
+		db.DailyPuzzle
+		Plays      int
+		FirstRound string
 	}
-	return emitJSON(puzzlesToJSON(puzzles))
+	enriched := make([]listRow, 0, len(puzzles))
+	for _, p := range puzzles {
+		plays, err := d.PuzzlePlayCount(ctx, p.ID)
+		if err != nil {
+			return emitError("db", err.Error(), nil)
+		}
+		firstRound, err := d.FirstRoundPromptText(ctx, p.ID)
+		if err != nil && !db.IsNotFound(err) {
+			return emitError("db", err.Error(), nil)
+		}
+		enriched = append(enriched, listRow{DailyPuzzle: p, Plays: plays, FirstRound: firstRound})
+	}
+
+	if *asTable {
+		rows := make([][]any, 0, len(enriched))
+		for _, r := range enriched {
+			rows = append(rows, []any{
+				r.PuzzleNumber,
+				r.PuzzleDate.Format("2006-01-02"),
+				r.Mode,
+				derefOr(r.Theme, "-"),
+				r.Plays,
+				truncate(orDash(r.FirstRound), 50),
+			})
+		}
+		return emitTable([]string{"NUMBER", "DATE", "MODE", "THEME", "PLAYS", "PROMPT0"}, rows)
+	}
+	out := make([]map[string]any, 0, len(enriched))
+	for _, r := range enriched {
+		row := map[string]any{
+			"puzzle_number": r.PuzzleNumber,
+			"puzzle_date":   r.PuzzleDate.Format("2006-01-02"),
+			"mode":          string(r.Mode),
+			"frozen_at":     r.FrozenAt.UTC().Format(time.RFC3339),
+			"theme":         r.Theme,
+			"plays":         r.Plays,
+		}
+		if r.FirstRound != "" {
+			row["prompt0"] = r.FirstRound
+		}
+		out = append(out, row)
+	}
+	return emitJSON(out)
 }
 
 // --- show --------------------------------------------------------------------
@@ -706,6 +751,98 @@ func puzzleSetAnswer(ctx context.Context, log *slog.Logger) error {
 	return emitOK("set-answer", payload)
 }
 
+// --- replace -----------------------------------------------------------------
+//
+// `puzzle replace --number N --content file.json [--confirm-plays K]` is the
+// destructive swap operators reach for when today's puzzle needs to be rebuilt
+// (broken decoy reported, mode change, hand-authored override). It composes:
+//
+//   1. Read + structurally validate the JSON.
+//   2. Confirm the file's puzzle_number matches --number.
+//   3. Count plays attached to puzzle N — refuse unless --confirm-plays K
+//      matches that count exactly, so an operator can't be surprised by a
+//      busy puzzle.
+//   4. DeleteDailyPuzzleAndPlays (single tx: plays + puzzle + cascades).
+//   5. applyImportDoc(): re-insert prompts, bots, decoys, and the puzzle.
+//
+// Steps 4 and 5 are NOT in a single transaction (the import path uses many
+// individual DB calls). If the import fails mid-way after the delete commits,
+// the puzzle slot will be empty; re-run with the same file once the cause
+// is fixed.
+
+func puzzleReplace(ctx context.Context, log *slog.Logger) error {
+	fs := flag.NewFlagSet("puzzle replace", flag.ExitOnError)
+	dbf := registerDBFlags(fs)
+	numberFlag := fs.Int("number", -1, "puzzle_number to replace (must match the JSON's puzzle_number)")
+	contentPath := fs.String("content", "", "path to import JSON describing the new puzzle (required)")
+	confirmPlays := fs.Int("confirm-plays", -1, "operator confirms exactly this many plays will be destroyed (required; pass 0 if none)")
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		return err
+	}
+	if *numberFlag < 1 {
+		return emitError("invalid", "--number is required (the puzzle_number to replace)", nil)
+	}
+	if *contentPath == "" {
+		return emitError("invalid", "--content path to JSON file is required", nil)
+	}
+	if *confirmPlays < 0 {
+		return emitError("invalid", "--confirm-plays is required; pass 0 if you expect no plays to be destroyed", nil)
+	}
+
+	doc, err := loadImportDoc(*contentPath)
+	if err != nil {
+		return emitError("invalid", err.Error(), nil)
+	}
+	if len(doc.Puzzles) != 1 {
+		return emitError("invalid", fmt.Sprintf("--content must describe exactly 1 puzzle, got %d", len(doc.Puzzles)), nil)
+	}
+	docPuzzle := doc.Puzzles[0]
+	if docPuzzle.PuzzleNumber != *numberFlag {
+		return emitError("invalid",
+			fmt.Sprintf("JSON puzzle_number=%d does not match --number=%d (refusing to ambiguously replace)", docPuzzle.PuzzleNumber, *numberFlag),
+			nil)
+	}
+
+	d, err := openDB(ctx, dbf, log)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+
+	existing, err := d.PuzzleByNumber(ctx, int32(*numberFlag))
+	if err != nil {
+		return puzzleErr(err)
+	}
+	plays, err := d.PuzzlePlayCount(ctx, existing.ID)
+	if err != nil {
+		return emitError("db", err.Error(), nil)
+	}
+	if plays != *confirmPlays {
+		return emitError("plays_mismatch",
+			fmt.Sprintf("puzzle #%d has %d plays; --confirm-plays=%d does not match", *numberFlag, plays, *confirmPlays),
+			map[string]any{"puzzle_number": *numberFlag, "actual_plays": plays, "confirmed_plays": *confirmPlays})
+	}
+
+	deletedPlays, err := d.DeleteDailyPuzzleAndPlays(ctx, int32(*numberFlag))
+	if err != nil {
+		return puzzleErr(err)
+	}
+	log.Info("puzzle removed for replace", "n", *numberFlag, "plays_deleted", deletedPlays)
+
+	if err := applyImportDoc(ctx, d, log, doc); err != nil {
+		// At this point the old puzzle is gone but the new one didn't land.
+		// Surface this clearly — re-running with the same file (once the
+		// cause is fixed) is the recovery path.
+		return emitError("import_failed_after_delete",
+			fmt.Sprintf("puzzle #%d was deleted but the new import failed: %v", *numberFlag, err),
+			map[string]any{"puzzle_number": *numberFlag, "plays_deleted": deletedPlays})
+	}
+	return emitOK("replace", map[string]any{
+		"puzzle_number": *numberFlag,
+		"plays_deleted": deletedPlays,
+	})
+}
+
 // --- delete ------------------------------------------------------------------
 
 func puzzleDelete(ctx context.Context, log *slog.Logger) error {
@@ -909,6 +1046,13 @@ func derefOr(p *string, def string) string {
 		return def
 	}
 	return *p
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 func truncate(s string, n int) string {

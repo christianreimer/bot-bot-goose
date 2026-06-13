@@ -1,5 +1,7 @@
 # Build artifacts (`make build` writes here)
 /bin/
+# Stray ad-hoc binary from `go build ./cmd/admin` at the repo root
+/admin
 
 # Local DB dumps
 /backups/
@@ -19,10 +21,11 @@
 coverage.out
 *.prof
 
-# Editor / IDE
+# Editor / IDE / Agent tooling
 .vscode/
 .idea/
 .cursor/
+.claude/
 *.iml
 *.swp
 *.swo

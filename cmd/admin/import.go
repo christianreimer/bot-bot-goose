@@ -57,21 +57,55 @@ type importBot struct {
 func runImport(ctx context.Context, log *slog.Logger) error {
 	fs := flag.NewFlagSet("import", flag.ExitOnError)
 	dbURL := fs.String("db", envDefault("BBG_DB_URL", "postgres://bbg:bbg@localhost:5432/bbg?sslmode=disable"), "db url")
+	dryRun := fs.Bool("dry-run", false, "validate the file and print what would be inserted; no writes")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return errors.New("usage: bbg-admin import <file.json>")
+		return errors.New("usage: bbg-admin import [--dry-run] <file.json>")
 	}
 	path := fs.Arg(0)
 
-	raw, err := os.ReadFile(path)
+	doc, err := loadImportDoc(path)
 	if err != nil {
-		return fmt.Errorf("read %s: %w", path, err)
+		return err
 	}
-	var doc importDoc
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return fmt.Errorf("parse %s: %w", path, err)
+
+	if *dryRun {
+		// Pre-flight: validate each puzzle's shape against its mode without
+		// touching the DB. Archetype slugs are checked against the in-binary
+		// StarterRoster (the same source UpsertArchetype seeds from).
+		valid := map[string]bool{}
+		for _, a := range content.StarterRoster {
+			valid[a.Slug] = true
+		}
+		var puzzleStats []map[string]any
+		var insertBots, insertDecoys int
+		for _, p := range doc.Puzzles {
+			if err := validatePuzzleShape(p, valid); err != nil {
+				return fmt.Errorf("puzzle %d: %w", p.PuzzleNumber, err)
+			}
+			for _, r := range p.Rounds {
+				insertBots += len(r.Bots)
+				insertDecoys += len(r.Decoys)
+			}
+			puzzleStats = append(puzzleStats, map[string]any{
+				"puzzle_number": p.PuzzleNumber,
+				"date":          p.Date,
+				"mode":          p.Mode,
+				"rounds":        len(p.Rounds),
+			})
+		}
+		log.Info("dry-run ok", "puzzles", len(doc.Puzzles), "prompts", len(doc.Prompts),
+			"bots_to_insert", insertBots, "decoys_to_insert", insertDecoys)
+		return emitJSON(map[string]any{
+			"dry_run":          true,
+			"file":             path,
+			"prompts_in_file":  len(doc.Prompts),
+			"puzzles":          puzzleStats,
+			"bots_to_insert":   insertBots,
+			"decoys_to_insert": insertDecoys,
+		})
 	}
 
 	d, err := db.Open(ctx, *dbURL)
@@ -80,6 +114,26 @@ func runImport(ctx context.Context, log *slog.Logger) error {
 	}
 	defer d.Close()
 
+	return applyImportDoc(ctx, d, log, doc)
+}
+
+// loadImportDoc reads and JSON-parses an import file. Does not validate the
+// per-puzzle shape — that's done lazily in importOnePuzzle / validatePuzzleShape.
+func loadImportDoc(path string) (*importDoc, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var doc importDoc
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return &doc, nil
+}
+
+// applyImportDoc writes the doc to the database. Used by `bbg-admin import`
+// and `bbg-admin puzzle replace`.
+func applyImportDoc(ctx context.Context, d *db.DB, log *slog.Logger, doc *importDoc) error {
 	// Make sure the archetype roster exists (idempotent — seed does the same).
 	arche := map[string]uuid.UUID{}
 	for _, a := range content.StarterRoster {
@@ -106,6 +160,31 @@ func runImport(ctx context.Context, log *slog.Logger) error {
 		}
 	}
 	log.Info("import complete", "puzzles", len(doc.Puzzles), "prompts", len(doc.Prompts))
+	return nil
+}
+
+// validatePuzzleShape is the dry-run check — it mirrors the validation done
+// inside importOnePuzzle, but doesn't need a live DB connection.
+func validatePuzzleShape(p importPuzzle, validArchetypes map[string]bool) error {
+	if p.Mode != "find_the_bot" && p.Mode != "find_the_human" {
+		return fmt.Errorf("bad mode %q", p.Mode)
+	}
+	if len(p.Rounds) != 3 {
+		return fmt.Errorf("want 3 rounds, got %d", len(p.Rounds))
+	}
+	if _, err := time.Parse("2006-01-02", p.Date); err != nil {
+		return fmt.Errorf("bad date: %w", err)
+	}
+	for ri, r := range p.Rounds {
+		if err := validateRound(p.Mode, ri, r); err != nil {
+			return err
+		}
+		for _, b := range r.Bots {
+			if !validArchetypes[b.Archetype] {
+				return fmt.Errorf("round %d: unknown archetype %q", ri, b.Archetype)
+			}
+		}
+	}
 	return nil
 }
 
