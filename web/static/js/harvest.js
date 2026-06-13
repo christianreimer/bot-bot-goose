@@ -1,6 +1,6 @@
 // /harvest — Phase-0 collection-campaign deck.
 //
-// 20 face-down cards in a grid. Tapping a card opens a centered overlay
+// 21 face-down cards in a fixed 3×7 grid. Tapping a card opens a centered overlay
 // "on top of" the grid (the grid does NOT move; the original card stays
 // in place, dimly highlighted). On Plant ▸ we POST to /api/harvest/submit
 // (writes to pre_launch_submissions, NEVER decoy_submissions). The

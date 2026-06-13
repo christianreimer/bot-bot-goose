@@ -53,7 +53,7 @@ func main() {
 	// grid + brand mark on a 1200x630 canvas. Sample outcomes (all green) so
 	// the layout is visible even before any plays exist.
 	sample := []game.Outcome{game.Green, game.Yellow, game.Red}
-	card := share.Card(p.PuzzleNumber, sample, game.Mode(p.Mode), 0, "botbotgoose.app")
+	card := share.Card(p.PuzzleNumber, sample, game.Mode(p.Mode), 0, "botbotgoose.fun")
 	fmt.Println(card)
 	log.Info("stub render", "puzzle", p.PuzzleNumber, "mode", p.Mode)
 }

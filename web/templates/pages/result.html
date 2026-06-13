@@ -11,7 +11,7 @@
   <div class="stage">
     <div class="result">
       <div class="big-goose">🪿</div>
-      <h2>Goose #{{ pad3 .PuzzleNumber }} caught</h2>
+      <h2>Goose #{{ pad3 .PuzzleNumber }} {{ if eq .ScorePct 0 }}<s class="strike">caught</s> got away{{ else }}caught{{ end }}</h2>
       <div class="verdict" id="verdict"></div>
 
       <div class="scorecard">
@@ -25,7 +25,7 @@
       <div class="controls">
         <button class="btn btn-primary" id="shareBtn" data-share-url="{{ .ShareURL }}">Share result</button>
         <div class="result-secondary">
-          <a class="btn btn-ghost btn-half" href="/me">See your decoys ▸</a>
+          <a class="btn btn-ghost btn-half" href="/me">You vs the Room ▸</a>
           <a class="btn btn-ghost btn-half" href="/leaderboard/spotters">Leaderboards ▸</a>
         </div>
       </div>
@@ -35,7 +35,7 @@
       {{ if not .SignedIn }}
         <div class="signin-cta">
           <b>Sign in</b> to keep your streak across devices and claim a handle on the leaderboard.
-          <a href="/me">Take 10 seconds ▸</a>
+          <a href="/me#signin">Take 10 seconds ▸</a>
         </div>
       {{ end }}
 
@@ -43,8 +43,8 @@
         {{ if .ExistingDecoyShareURL }}
         <div class="decoy">
           <h3>You've planted one here already 🪶</h3>
-          <p>Tomorrow's prompt: <span class="nextprompt">&ldquo;{{ .NextPromptText }}&rdquo;</span><br>
-            Design rule: one decoy per prompt per player. Yours is
+          <p><span class="nextprompt">&ldquo;{{ .NextPromptText }}&rdquo;</span><br>
+            One decoy per prompt per player. Yours is
             {{ if eq .ExistingDecoyStatus "pending" }}<b>in review</b>{{ end }}
             {{ if eq .ExistingDecoyStatus "approved" }}<b>live</b>{{ end }}
             {{ if eq .ExistingDecoyStatus "rejected" }}<b>not picked</b>{{ end }}
@@ -56,15 +56,18 @@
         </div>
         {{ else }}
         <div class="decoy">
-          <h3>Become tomorrow's decoy 🪶</h3>
-          <p>Tomorrow's prompt: <span class="nextprompt">&ldquo;{{ .NextPromptText }}&rdquo;</span><br>
-            Write a <b>human</b> answer. The best ones get planted alongside the bot. Your words help fool the next player.</p>
+          <h3>Set a trap</h3>
+          <p class="decoy-target"><span class="nextprompt">&ldquo;{{ .NextPromptText }}&rdquo;</span></p>
+          <p class="decoy-body">
+            Type like a person, not a press release.<br>
+            The strongest answers slot in beside the bot and fool strangers.<br>
+            Around here, that's a compliment.
+          </p>
           <form id="decoyForm" data-prompt-id="{{ .NextPromptID }}">
-            <textarea id="decoyText" maxlength="220" placeholder="type like a person, not a press release…" required minlength="4"></textarea>
-            <button type="submit" class="btn btn-primary" id="decoySubmit">Submit my answer</button>
-            <div class="decoy-meta">
-              <small id="decoyHint">one per prompt — review takes a moment before it goes live</small>
-            </div>
+            <textarea id="decoyText" maxlength="220" minlength="4" required
+                      placeholder="one honest line. no need to perform."></textarea>
+            <button type="submit" class="btn btn-primary" id="decoySubmit">Plant ▸</button>
+            <small class="decoy-hint" id="decoyHint">One per prompt. Reviewed before it goes live.</small>
           </form>
         </div>
         {{ end }}

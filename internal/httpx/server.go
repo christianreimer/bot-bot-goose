@@ -117,8 +117,17 @@ func (s *Server) routes() {
 
 	// System endpoints — no session, no CSRF, no template overhead.
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("ok")) })
+	// Privacy disclosure. Outside the session-middleware group on purpose:
+	// reading the privacy page should not be the moment we set a cookie.
+	r.Get("/privacy", s.handlePrivacy)
 	r.Get("/readyz", s.handleReadyz)
 	r.Get("/robots.txt", s.handleRobots)
+
+	// Themed 404 for any path that doesn't match a route above or below.
+	// Outside the session-middleware group too: minting a cookie just
+	// because someone hit a typo'd URL is bad UX (and would mask the
+	// session-mint error path).
+	r.NotFound(s.renderNotFound)
 
 	// Static — content-hashed URLs (?v=<hash>) come from the `asset` template
 	// helper, so we can set far-future Cache-Control here without risking a
@@ -134,9 +143,11 @@ func (s *Server) routes() {
 		r.Use(users.Middleware(s.cfg.DB, s.cfg.SessionKey, s.cfg.SecureCookie))
 		r.Use(users.CSRFMiddleware(s.cfg.SecureCookie))
 
+		// Only one entry point to the play surface: "/" serves today's
+		// puzzle (or today's result, if the user has completed it).
+		// Historical access is by share URL only (/r/<short>, /d/<short>),
+		// keying on row IDs rather than puzzle numbers.
 		r.Get("/", s.handlePlayLanding)
-		r.Get("/play/{n}", s.handlePlaySpecific)
-		r.Get("/play/{n}/result", s.handlePlayResult)
 
 		r.Get("/me", s.handleMe)
 		r.Get("/leaderboard/forgers", s.handleLeaderboardForgers)
@@ -175,7 +186,6 @@ func (s *Server) routes() {
 			r.Post("/play/round/{n}/guess", s.handleAPIGuess)
 			r.Post("/decoy/submit", s.handleAPIDecoySubmit)
 			r.Patch("/me/handle", s.handlePatchHandle)
-			r.Patch("/me/anonymous", s.handlePatchAnonymous)
 		})
 	})
 
@@ -194,7 +204,7 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRobots(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
-	_, _ = w.Write([]byte("User-agent: *\nDisallow: /play/\nDisallow: /api/\n"))
+	_, _ = w.Write([]byte("User-agent: *\nDisallow: /api/\n"))
 }
 
 // cacheImmutable sets a year-long Cache-Control on responses. Safe only for

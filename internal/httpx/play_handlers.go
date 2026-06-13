@@ -76,20 +76,6 @@ func (s *Server) handlePlayLanding(w http.ResponseWriter, r *http.Request) {
 	s.renderPlayPage(w, r, puzzle)
 }
 
-func (s *Server) handlePlaySpecific(w http.ResponseWriter, r *http.Request) {
-	n, err := strconv.Atoi(chi.URLParam(r, "n"))
-	if err != nil || n <= 0 {
-		http.NotFound(w, r)
-		return
-	}
-	puzzle, err := s.cfg.DB.PuzzleByNumber(r.Context(), int32(n))
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	s.renderPlayPage(w, r, puzzle)
-}
-
 func (s *Server) renderPlayPage(w http.ResponseWriter, r *http.Request, puzzle *db.DailyPuzzle) {
 	u := users.FromContext(r.Context())
 	// Derive the base URL from the request so share artifacts carry the URL
@@ -181,20 +167,6 @@ func (s *Server) renderPlayPage(w http.ResponseWriter, r *http.Request, puzzle *
 		"BaseURL":      baseURL,
 		"SignedIn":     signedIn,
 	})
-}
-
-func (s *Server) handlePlayResult(w http.ResponseWriter, r *http.Request) {
-	n, err := strconv.Atoi(chi.URLParam(r, "n"))
-	if err != nil || n <= 0 {
-		http.NotFound(w, r)
-		return
-	}
-	puzzle, err := s.cfg.DB.PuzzleByNumber(r.Context(), int32(n))
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	s.renderPlayPage(w, r, puzzle)
 }
 
 // composePlayState builds the page-load state. It will create a play row +

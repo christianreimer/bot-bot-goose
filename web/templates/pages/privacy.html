@@ -1,0 +1,192 @@
+{{ template "base.html" . }}
+
+{{ define "title" }}Privacy · Bot Bot Goose{{ end }}
+
+{{ define "og" }}
+  <meta property="og:title" content="Privacy · Bot Bot Goose" />
+  <meta property="og:description" content="What we keep, what we don't. Cookies, data, third parties, retention, and your rights." />
+{{ end }}
+
+{{ define "header-meta" }}
+  <a href="/" class="nav-link">← home</a>
+{{ end }}
+
+{{ define "content" }}
+  <article class="stage privacy">
+    <header class="privacy-header">
+      <h1 class="prompt-headline">What we keep, what we don't.</h1>
+      <p class="privacy-updated">Updated 2026-06-12</p>
+    </header>
+
+    <section class="privacy-section">
+      <h3>In short</h3>
+      <p>
+        We need to know who you are well enough to keep your streak,
+        attribute your decoys to you, and stop the same device from
+        spamming the same prompt. We don't need anything more, and we
+        don't collect anything more.
+      </p>
+      <p>
+        There are no analytics, no third-party trackers, no advertising
+        IDs, no fingerprinting, no microphone, no camera, no location,
+        no social-login SDKs.
+      </p>
+    </section>
+
+    <section class="privacy-section">
+      <h3>Cookies</h3>
+      <p>
+        Two, both first-party, both required for the service to work.
+        Neither requires consent under the ePrivacy directive: both fall
+        under "strictly necessary."
+      </p>
+      <ul>
+        <li>
+          <b>bbg_dev_v1</b> (365 days). An opaque random token plus an HMAC of
+          it. We store its SHA-256 against a row in our database so we can
+          attach your decoys, streaks, and leaderboard rank to "you, on this
+          device." Carries no personal data and never leaves our server.
+        </li>
+        <li>
+          <b>bbg_csrf_v1</b> (7 days). A short random token. Prevents another
+          website from forging a form post on your behalf. Carries no identity.
+        </li>
+      </ul>
+    </section>
+
+    <section class="privacy-section">
+      <h3>What we store on our server</h3>
+      <p>Tied to your device cookie:</p>
+      <ul>
+        <li>An anonymous user row. Just an internal ID until you sign in.</li>
+        <li>Your <b>handle</b>, if you set one.</li>
+        <li>Your <b>email</b>, only if you used the magic-link sign-in. We use it to identify "the same person on a different phone." We never share it, and we never email you anything except a one-tap sign-in link when you ask.</li>
+        <li>Your <b>plays</b>: which puzzles you completed, your per-round outcomes, your Bot-Dar.</li>
+        <li>Your <b>streak</b>.</li>
+        <li>Your <b>decoys</b>: the human answers you submitted, attached to the prompt each is for.</li>
+        <li>Your <b>forger rank</b>, derived from how those decoys performed.</li>
+      </ul>
+      <p>For the harvest campaign (the Reddit landing page):</p>
+      <ul>
+        <li>Your <b>harvested answers</b>, attached to the prompt each is for.</li>
+        <li>Your <b>IP address</b>, briefly, for spam rate-limiting.</li>
+      </ul>
+      <p>For security:</p>
+      <ul>
+        <li><b>Hashed magic-link tokens</b>, while they're outstanding (15 min) and as a post-consume audit row.</li>
+        <li>Your <b>IP address</b> in rate-limit buckets so we can spot scripted abuse.</li>
+        <li>Your <b>User-Agent</b> string, for debugging access patterns.</li>
+      </ul>
+    </section>
+
+    <section class="privacy-section">
+      <h3>What we explicitly don't store</h3>
+      <ul>
+        <li>Your <b>email</b> is never written into our <code>magic_links</code> table. It's sealed inside the signed sign-in link itself; the row only stores a hash. A database dump alone reveals no addresses.</li>
+        <li>Your <b>passwords</b>: we don't have any. Sign-in is magic-link only.</li>
+        <li>Your <b>location</b>: we never request it.</li>
+        <li>The <b>shared grid</b> carries no spoilers and no personal data.</li>
+        <li>Any <b>analytics events</b>: we have none.</li>
+      </ul>
+    </section>
+
+    <section class="privacy-section">
+      <h3>Third parties</h3>
+      <ul>
+        <li><b>Resend</b> sends our sign-in emails. They receive your email address (they have to, to deliver) and retain delivery logs as their own policy describes. We use no other Resend feature.</li>
+        <li><b>Cloudflare</b> may terminate TLS and bridge your traffic to our server. Standard reverse-proxy logging applies on their side.</li>
+        <li><b>Anthropic</b> generates the bot answers, offline only. Your data is never sent to Anthropic.</li>
+      </ul>
+      <p>That's the whole list. There is no fourth party.</p>
+    </section>
+
+    <section class="privacy-section">
+      <h3>How long we keep things</h3>
+      <div class="privacy-table">
+        <div class="privacy-table-row">
+          <span class="label">device_cookies</span>
+          <span class="value">1 year of inactivity</span>
+        </div>
+        <div class="privacy-table-row">
+          <span class="label">magic_links</span>
+          <span class="value">15 min (active) + audit retention</span>
+        </div>
+        <div class="privacy-table-row">
+          <span class="label">pre_launch_submissions (IP)</span>
+          <span class="value">until the harvest campaign closes</span>
+        </div>
+        <div class="privacy-table-row">
+          <span class="label">plays, decoys, leaderboards</span>
+          <span class="value">until you ask us to delete</span>
+        </div>
+      </div>
+      <p class="muted">
+        We don't automatically purge yet: a cleanup job is on the
+        backlog. In the meantime, request deletion any time and we
+        will action it manually.
+      </p>
+    </section>
+
+    <section class="privacy-section">
+      <h3>Identifying yourself</h3>
+      <p>
+        Before we can act on a data-access or deletion request, we need
+        to be confident it's genuinely from the person whose data it
+        concerns. How that works depends on whether you've signed in.
+      </p>
+      <ul>
+        <li>
+          <b>Signed in with email.</b> We send a one-tap verification link
+          to your address; click it to confirm. Same flow as signing in.
+        </li>
+        <li>
+          <b>Anonymous only.</b> The <code>bbg_dev_v1</code> cookie in
+          your browser is the only identity we have for you. The cleanest
+          path is to sign in via magic-link from that device first
+          (this merges your anonymous activity into the resulting account)
+          and then use the signed-in path above.
+        </li>
+      </ul>
+      <p class="muted">
+        If you've cleared the cookie, used incognito, or lost the device,
+        we genuinely can't match a name in your message to a row in our
+        database. We don't keep a secondary index that would let us
+        undo anonymity on someone's behalf. GDPR Article 11 allows the
+        controller to decline a request when the data subject can no
+        longer be identified, and that's the position we'd be in.
+        Anonymous play is anonymous, on purpose.
+      </p>
+    </section>
+
+    <section class="privacy-section">
+      <h3>Your rights</h3>
+      <p>Once you've verified yourself (above), you can:</p>
+      <ul>
+        <li><b>Ask what we have on you.</b> File a request via the channel below; we'll send a copy of every row tied to your verified account.</li>
+        <li><b>Ask us to delete your account.</b> We will delete your user row, your decoys, your plays, your streak, and your forger rank. We'll also unbind anonymous content the same device produced before you signed in.</li>
+        <li><b>Sign out of every device.</b> The "Sign out everywhere" button on <code>/me</code> does this without involving us. It doesn't delete data, just revokes session access.</li>
+      </ul>
+    </section>
+
+    <section class="privacy-section">
+      <h3>When this page changes</h3>
+      <p>
+        If we add a third party, change what we store, or change a
+        retention window, this page updates and we'll note the change
+        in the project CHANGELOG.
+      </p>
+    </section>
+
+    <section class="privacy-section">
+      <h3>Contact</h3>
+      <p>
+        For security-sensitive issues, file a private report via
+        <a href="https://github.com/christianreimer/bot-bot-goose/security/advisories/new" class="link">GitHub Security Advisories</a>.
+        For non-security privacy questions or deletion requests, open
+        an issue on
+        <a href="https://github.com/christianreimer/bot-bot-goose/issues" class="link">the public tracker</a>
+        or reply to any system email you've received from us.
+      </p>
+    </section>
+  </article>
+{{ end }}

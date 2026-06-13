@@ -57,18 +57,17 @@
         try { body = await r.json(); } catch (_) { body = {}; }
       } catch (err) {
         submitBtn.disabled = false;
-        flash('Network error — please retry');
+        flash('Network error. Please retry.');
         return;
       }
       if (r.ok) {
         // Replace the form with a confirmation. The plan's payoff loop §4:
-        // "Decoy locked. 🪶 It goes live in tomorrow's puzzle..."
+        // decoy enters review, lands in a future puzzle once approved.
         ta.disabled = true;
         const meta = document.getElementById('decoyHint');
-        if (meta) meta.textContent = 'queued for review';
+        if (meta) meta.textContent = 'Queued for review.';
         const shareUrl = body && body.share_url ? body.share_url : '/me';
-        submitBtn.outerHTML =
-          '<div class="ok">✓ Planted. <a href="' + shareUrl + '" style="color:var(--reed);">See your decoy ▸</a></div>';
+        submitBtn.replaceWith(plantedOk('✓ Planted. ', 'See your decoy ▸', shareUrl));
         flash('Decoy planted 🪶');
         return;
       }
@@ -81,16 +80,15 @@
         const link = ex.share_url || '/me';
         ta.disabled = true;
         const meta = document.getElementById('decoyHint');
-        if (meta) meta.textContent = 'one decoy per prompt — design rule';
-        submitBtn.outerHTML =
-          '<div class="ok">🪶 You’ve already planted one here. <a href="' + link + '" style="color:var(--reed);">See it ▸</a></div>';
+        if (meta) meta.textContent = 'One per prompt.';
+        submitBtn.replaceWith(plantedOk("🪶 You've already planted one here. ", 'See it ▸', link));
         flash('Already planted here.');
         return;
       }
       if (code === 'rate_limited') {
         const secs = (body && body.retry_after_sec) || 0;
         const mins = Math.max(1, Math.round(secs / 60));
-        flash('Slow down — try again in ' + mins + ' min');
+        flash('Slow down. Try again in ' + mins + ' min.');
         return;
       }
       if (code === 'bad_text') {
@@ -99,6 +97,22 @@
       }
       flash('Submit failed: ' + (code || r.statusText || 'unknown'));
     });
+  }
+
+  // Build a "✓ Planted." confirmation node without going through innerHTML.
+  // The URL is forced to a same-origin relative path so a misbehaving server
+  // response can't smuggle a `javascript:` link in.
+  function plantedOk(text, linkText, url) {
+    const safe = typeof url === 'string' && url.startsWith('/') ? url : '/me';
+    const ok = document.createElement('div');
+    ok.className = 'ok';
+    ok.appendChild(document.createTextNode(text));
+    const a = document.createElement('a');
+    a.href = safe;
+    a.style.color = 'var(--reed)';
+    a.textContent = linkText;
+    ok.appendChild(a);
+    return ok;
   }
 
   function readCookie(name) {
@@ -122,7 +136,7 @@
     const caught = (outs || []).filter(o => o !== 'red').length;
     const perfect = (outs || []).every(o => o === 'green');
     const targetWord = mode === 'find_the_human' ? 'human' : 'goose';
-    if (perfect) return `Flawless. The ${targetWord === 'human' ? 'bots' : 'bots'} fear you.`;
+    if (perfect) return `Flawless. The ${targetWord === 'human' ? 'humans' : 'bots'} fear you.`;
     if (caught === 3) return `Caught every ${targetWord}. A hint or two slipped in.`;
     if (caught === 2) return `Two of three. The ${targetWord === 'human' ? 'humans' : 'bots'} are getting good.`;
     if (caught === 1) return `One catch. Honk back harder tomorrow.`;

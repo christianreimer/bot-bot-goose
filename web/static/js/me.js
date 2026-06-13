@@ -2,7 +2,6 @@
 //   - per-decoy "Share report" buttons to the pre-built card text
 //   - the sign-in form (POST /api/auth/magic/request)
 //   - the handle picker (PATCH /api/me/handle)
-//   - the anonymous toggle (PATCH /api/me/anonymous)
 //
 // Everything posts JSON with the CSRF cookie value as the X-CSRF-Token
 // header so the double-submit middleware lets it through.
@@ -19,10 +18,33 @@
     });
   });
 
+  // ---- arrived via /me#signin → focus the email input ------------------
+  // The result-page CTA links to /me#signin so the browser auto-scrolls
+  // to the form. We additionally pull focus into the email input so the
+  // user can start typing without a second tap. Guard on the form
+  // actually being present — if the user is already signed in, the
+  // hash points to an element that doesn't exist and we skip.
+  if (window.location.hash === '#signin') {
+    const emailInput = document.getElementById('magicEmail');
+    if (emailInput) {
+      // requestAnimationFrame lets the browser's hash-anchor scroll
+      // settle before we steal focus (otherwise mobile Safari sometimes
+      // re-scrolls to the input and overshoots the section header).
+      requestAnimationFrame(() => emailInput.focus({ preventScroll: true }));
+    }
+  }
+
   // ---- "just signed in" one-time toast ----------------------------------
+  // Guard on #logoutBtn — only rendered when the server confirms a signed-in
+  // user. Without this guard, sharing the /me?signed_in=1 URL to a device
+  // without the auth cookie would flash a misleading "welcome back" even
+  // though the page actually shows the sign-in form.
   if (new URLSearchParams(window.location.search).get('signed_in') === '1') {
-    flash('Signed in. Welcome back 🪿');
-    // Scrub the query string so a reload doesn't re-flash.
+    if (document.getElementById('logoutBtn')) {
+      flash('Signed in. Welcome back 🪿');
+    }
+    // Scrub the query string either way so a reload doesn't re-trigger the
+    // check (and so the misleading URL doesn't linger in history).
     history.replaceState({}, '', window.location.pathname);
   }
 
@@ -47,12 +69,48 @@
   }
 
   // ---- handle picker ----------------------------------------------------
-  const handleForm = document.getElementById('handleForm');
+  // Two modes:
+  //   display — read-only "@handle  edit" row (initial state if .Handle is set)
+  //   edit    — input + save + cancel (initial state on first sign-in)
+  // After a successful save we drop back to display mode so the picker
+  // disappears until the user actively asks to change it.
+  const handleForm    = document.getElementById('handleForm');
+  const handleInput   = document.getElementById('handleInput');
+  const handleDisplay = document.getElementById('handleDisplay');
+  const handleValueEl = document.getElementById('handleValue');
+  const handleEditBtn = document.getElementById('handleEditBtn');
+  const handleCancel  = document.getElementById('handleCancelBtn');
+  const handleHint    = document.getElementById('handleHint');
+  const handleHintDefault = '3–20 chars · letters, digits, _ -';
+
+  function showHandleEdit() {
+    if (handleDisplay) handleDisplay.hidden = true;
+    if (handleForm)    handleForm.hidden    = false;
+    if (handleHint) {
+      handleHint.hidden      = false;
+      handleHint.textContent = handleHintDefault;
+      handleHint.classList.remove('warn');
+    }
+    if (handleInput) { handleInput.focus(); handleInput.select(); }
+  }
+  function showHandleDisplay(newValue) {
+    if (newValue && handleValueEl) handleValueEl.textContent = newValue;
+    if (handleDisplay) handleDisplay.hidden = false;
+    if (handleForm)    handleForm.hidden    = true;
+    if (handleHint)    handleHint.hidden    = true;
+    if (handleCancel)  handleCancel.hidden  = false; // once there's a value to revert to
+  }
+
+  if (handleEditBtn) handleEditBtn.addEventListener('click', showHandleEdit);
+  if (handleCancel) handleCancel.addEventListener('click', () => {
+    if (handleInput && handleValueEl) handleInput.value = handleValueEl.textContent.trim();
+    showHandleDisplay();
+  });
+
   if (handleForm) {
     handleForm.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const value = document.getElementById('handleInput').value.trim();
-      const hint = document.getElementById('handleHint');
+      const value = (handleInput?.value || '').trim();
       const r = await fetch('/api/me/handle', {
         method: 'PATCH',
         credentials: 'same-origin',
@@ -62,38 +120,15 @@
       let body = {};
       try { body = await r.json(); } catch (_) {}
       if (r.ok) {
-        if (hint) { hint.textContent = '✓ saved as ' + body.handle; hint.classList.remove('warn'); }
+        showHandleDisplay(body.handle);
         flash('Handle saved.');
       } else {
         const msg = ({
-          'bad_handle': '3–20 chars, letters/digits/_/- only — and not starting with _ or -',
-          'reserved': "that one's reserved, try another",
-          'handle_taken': 'taken — try another',
+          'bad_handle': '3–20 chars, letters/digits/_/- only. Not starting with _ or -.',
+          'reserved':   "That one's reserved. Try another.",
+          'handle_taken': 'Taken. Try another.',
         })[body.code] || ('error: ' + (body.code || r.statusText));
-        if (hint) { hint.textContent = msg; hint.classList.add('warn'); }
-      }
-    });
-  }
-
-  // ---- anonymous toggle -------------------------------------------------
-  const anonToggle = document.getElementById('anonToggle');
-  if (anonToggle) {
-    anonToggle.addEventListener('change', async () => {
-      // checked = "show as handle"; unchecked = anonymous.
-      const anon = !anonToggle.checked;
-      const r = await fetch('/api/me/anonymous', {
-        method: 'PATCH',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': readCookie('bbg_csrf_v1') || '' },
-        body: JSON.stringify({ anonymous: anon }),
-      });
-      if (r.ok) {
-        const label = anonToggle.parentElement.querySelector('span');
-        if (label) label.textContent = anon ? 'anonymous' : 'as my handle';
-        flash(anon ? 'Showing as anonymous.' : 'Showing as your handle.');
-      } else {
-        anonToggle.checked = !anonToggle.checked; // revert
-        flash('Could not update — please retry');
+        if (handleHint) { handleHint.textContent = msg; handleHint.classList.add('warn'); }
       }
     });
   }
@@ -137,12 +172,12 @@
   }
 
   let toastTimer;
-  function flash(msg) {
+  function flash(msg, durationMs) {
     const t = document.getElementById('toast');
     if (!t) return;
     t.textContent = msg;
     t.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+    toastTimer = setTimeout(() => t.classList.remove('show'), durationMs || 2200);
   }
 })();

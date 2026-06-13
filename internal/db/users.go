@@ -8,11 +8,20 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// CreateAnonymousUser inserts a user with no email/handle. Returns the new id.
-func (d *DB) CreateAnonymousUser(ctx context.Context) (uuid.UUID, error) {
+// CreateAnonymousUser inserts a user with no email and an auto-assigned
+// handle of the form "AnonymousGoose<n>". The number is drawn from the
+// anonymous_goose_seq sequence (migration 0007), so even brand-new
+// anonymous players have a stable display name across leaderboards and
+// share artifacts. Returns the new id and assigned handle.
+func (d *DB) CreateAnonymousUser(ctx context.Context) (uuid.UUID, string, error) {
 	var id uuid.UUID
-	err := d.QueryRow(ctx, `INSERT INTO users DEFAULT VALUES RETURNING id`).Scan(&id)
-	return id, err
+	var handle string
+	err := d.QueryRow(ctx, `
+		INSERT INTO users (handle)
+		VALUES ('AnonymousGoose' || nextval('anonymous_goose_seq'))
+		RETURNING id, handle
+	`).Scan(&id, &handle)
+	return id, handle, err
 }
 
 // InsertDeviceCookie binds a hashed cookie to a user. cookieHash is the
@@ -31,7 +40,7 @@ func (d *DB) InsertDeviceCookie(ctx context.Context, userID uuid.UUID, cookieHas
 // ErrNotFound if no row matches.
 func (d *DB) UserByCookieHash(ctx context.Context, cookieHash []byte) (*User, error) {
 	const q = `
-		SELECT u.id, u.handle, u.email, u.role, u.spotter_elo, u.display_anonymous, u.created_at
+		SELECT u.id, u.handle, u.email, u.role, u.spotter_elo, u.created_at
 		  FROM device_cookies dc
 		  JOIN users u ON u.id = dc.user_id
 		 WHERE dc.cookie_hash = $1 AND u.deleted_at IS NULL
@@ -39,7 +48,7 @@ func (d *DB) UserByCookieHash(ctx context.Context, cookieHash []byte) (*User, er
 	`
 	row := d.QueryRow(ctx, q, cookieHash)
 	u := &User{}
-	if err := row.Scan(&u.ID, &u.Handle, &u.Email, &u.Role, &u.SpotterELO, &u.DisplayAnonymous, &u.CreatedAt); err != nil {
+	if err := row.Scan(&u.ID, &u.Handle, &u.Email, &u.Role, &u.SpotterELO, &u.CreatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}

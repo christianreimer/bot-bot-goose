@@ -45,7 +45,11 @@ body{
 .app{
   width:100%;
   max-width:520px;
-  padding:18px 18px calc(40px + env(safe-area-inset-bottom));
+  /* Bottom padding gives the footer breathing room above the home indicator
+     AND above Safari's transient bottom toolbar. 40px wasn't enough — the
+     tagline read as crammed against the chrome on iPhone. 64px feels
+     intentional. env() adds the home-indicator zone on top. */
+  padding:18px 18px calc(64px + env(safe-area-inset-bottom));
   padding-left:max(18px, env(safe-area-inset-left));
   padding-right:max(18px, env(safe-area-inset-right));
   display:flex;
@@ -156,9 +160,19 @@ header{
 .result .big-goose{font-size:54px;margin-bottom:4px;}
 .page-mark{font-size:26px;line-height:1;margin-bottom:6px;opacity:.85;}
 .result h2{font-family:var(--display);font-weight:800;font-size:27px;letter-spacing:-.02em;margin-bottom:4px;}
-.result .verdict{color:var(--muted);font-size:14px;margin-bottom:20px;}
+.result h2 .strike{color:var(--muted);text-decoration-thickness:2px;font-weight:600;}
+/* Base .verdict treatment — a muted subtitle. Used on the result page,
+   /me, /leaderboard/*, and /d/<short>. .me-header-tight overrides size. */
+.verdict{color:var(--muted);font-size:14px;line-height:1.45;margin-bottom:20px;}
 
 .scorecard{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:20px;margin-bottom:16px;}
+/* Result-page vertical rhythm: 22px between top-level sections
+   (scorecard → controls → signin → decoy), 10px intra-group inside
+   .controls. Matches the DESIGN.md "22px between sections" rule and
+   keeps the page from drifting back to ad-hoc per-element margins. */
+.result > .controls,
+.result > .signin-cta,
+.result > .decoy{margin-top:22px;}
 .grid-rows{font-family:var(--mono);font-size:26px;letter-spacing:6px;line-height:1.5;}
 .botdar{display:flex;justify-content:center;gap:22px;margin-top:14px;padding-top:14px;border-top:1px solid var(--line);}
 .stat .n{font-family:var(--display);font-weight:800;font-size:22px;}
@@ -166,21 +180,24 @@ header{
 .stat .n.honk{color:var(--honk);}
 
 .decoy{background:transparent;border:1px solid var(--line);border-top:2px solid var(--honk);border-radius:16px;padding:18px;margin-top:6px;text-align:left;}
-.decoy h3{font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:4px;}
-.decoy p{font-size:13px;color:var(--muted);margin-bottom:12px;line-height:1.45;}
-.decoy .nextprompt{color:var(--ink);font-style:italic;}
+.decoy h3{font-family:var(--display);font-weight:700;font-size:20px;letter-spacing:-.01em;color:var(--ink);margin-bottom:8px;}
+.decoy-target{font-family:var(--body);font-size:16px;line-height:1.3;color:var(--ink);margin-bottom:14px;text-transform:none;letter-spacing:normal;}
+.decoy-target .nextprompt{color:var(--ink);font-style:italic;font-weight:500;}
+.decoy-body{font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:14px;}
 /* font-size:16px is the iOS-Safari threshold below which the browser
    auto-zooms into the input on focus — that zoom shoves the layout
    sideways and produces the horizontal-scroll bug the user hit on
    iPhone 15. 16px is the minimum where iOS leaves the page alone. */
 textarea{width:100%;background:var(--pond-deep);border:1.5px solid var(--line);border-radius:11px;color:var(--ink);font-family:var(--body);font-size:16px;padding:11px;resize:vertical;min-height:66px;margin-bottom:10px;}
 textarea:focus{outline:none;border-color:var(--honk);}
-.decoy-meta{display:flex;justify-content:space-between;align-items:center;margin-top:10px;}
-.decoy-meta small{color:var(--muted);font-family:var(--mono);font-size:11px;}
+textarea#decoyText{min-height:88px;}
+.decoy-hint{display:block;color:var(--muted);font-family:var(--mono);font-size:11px;margin-top:10px;}
 .ok{color:var(--reed);font-size:13px;font-weight:600;}
 
-footer{margin-top:22px;padding-top:14px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;}
+footer{margin-top:22px;padding:14px 0 4px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:14px;}
 footer small{color:var(--muted);font-family:var(--mono);font-size:11px;}
+.footer-link{color:var(--muted);font-family:var(--mono);font-size:11px;text-decoration:none;letter-spacing:.04em;}
+.footer-link:hover{color:var(--ink);}
 
 .toast{
   position:fixed;bottom:calc(24px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%) translateY(20px);
@@ -199,6 +216,29 @@ footer small{color:var(--muted);font-family:var(--mono);font-size:11px;}
 .scorecard .kicker{display:block;text-align:center;margin:0 0 12px;}
 .me-header h2{font-family:var(--display);font-weight:800;font-size:24px;letter-spacing:-.02em;}
 .section-h{font-family:var(--display);font-weight:700;font-size:14px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);margin:22px 0 8px;}
+
+/* /me standings — one card per leaderboard (spotter, forger). The card
+   IS the link to the full leaderboard, so the whole rectangle is
+   tappable. Reuses the editorial honk-stripe-on-top pattern from .payoff
+   and .decoy; .standing-pending demotes the stripe to a dim line when
+   the user hasn't crossed the eligibility gate. */
+.standing-card{
+  display:block;text-decoration:none;
+  background:transparent;
+  border:1px solid var(--line);border-top:2px solid var(--honk);
+  border-radius:14px;padding:14px 16px;
+  margin-bottom:10px;
+  transition:border-color .2s ease, background .2s ease;
+}
+.standing-card:hover{background:rgba(244,162,59,.04);border-color:rgba(244,162,59,.32);}
+.standing-card.standing-pending{border-top-color:var(--line);}
+.standing-card.standing-pending:hover{background:rgba(244,239,227,.03);border-color:rgba(244,239,227,.22);}
+.standing-row{display:flex;justify-content:space-between;align-items:baseline;gap:14px;}
+.standing-label{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);line-height:1.3;}
+.standing-label b{color:var(--ink);font-weight:700;}
+.standing-stat{font-family:var(--display);font-weight:800;font-size:24px;color:var(--honk);letter-spacing:-.02em;line-height:1;}
+.standing-card.standing-pending .standing-stat{color:var(--muted);}
+.standing-note{font-size:13px;color:var(--muted);line-height:1.4;margin-top:6px;}
 
 .payoff{
   background:transparent;
@@ -222,21 +262,13 @@ footer small{color:var(--muted);font-family:var(--mono);font-size:11px;}
   flex:1;text-align:center;text-decoration:none;display:block;
 }
 
-/* ---- /me leaderboard nav row ---- */
-.lb-nav{
-  display:flex;gap:10px;align-items:center;justify-content:center;
-  font-family:var(--mono);font-size:12px;margin:6px 0 14px;
-  padding:8px 12px;background:rgba(244,162,59,.04);
-  border:1px solid var(--line);border-radius:10px;
-}
-.lb-nav .nav-link{color:var(--honk);text-decoration:none;}
-.lb-nav .nav-link:hover{text-decoration:underline;}
-
 /* ---- /harvest (Phase-0 collection deck) ----
-   Layout: 4-column grid of face-down cards. Tapping a card expands it
-   in-place to span the full grid width and reveals its question + input.
-   On submit the card fades + scales out; remaining cards FLIP-animate
-   into their new positions via JS (see harvest.js dismissCard). */
+   Layout: fixed 3-column × 7-row grid of face-down cards (21 total) on
+   every viewport — phones and desktops alike. The narrow column matches
+   the rest of the app's 520px max-width feel, and a constant column
+   count means the rendered grid looks the same on a poster screenshot
+   regardless of device. Tapping a card opens a centered overlay above
+   the grid; the grid doesn't reflow. */
 .harvest-stage{align-items:stretch;}
 .harvest-lede,
 .harvest-done{
@@ -253,7 +285,7 @@ footer small{color:var(--muted);font-family:var(--mono);font-size:11px;}
 
 .card-grid{
   display:grid;
-  grid-template-columns:repeat(auto-fit, minmax(94px, 1fr));
+  grid-template-columns:repeat(3, 1fr);
   gap:10px;margin-top:18px;
   counter-reset:harvestCard;
 }
@@ -403,6 +435,7 @@ footer small{color:var(--muted);font-family:var(--mono);font-size:11px;}
 }
 .account-value{font-family:var(--body);font-size:14px;color:var(--ink);}
 .inline-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.inline-form[hidden]{display:none;}
 .inline-form input[type=text],.inline-form input[type=email]{
   background:var(--pond-deep);border:1.5px solid var(--line);border-radius:10px;
   /* 16px to dodge iOS Safari's auto-zoom on focus (see textarea above). */
@@ -418,8 +451,11 @@ footer small{color:var(--muted);font-family:var(--mono);font-size:11px;}
 .btn-tiny:disabled{opacity:.5;cursor:default;}
 .muted.warn{color:var(--miss);}
 
-.toggle{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;}
-.toggle input{margin:0;}
+/* Handle display row — the "@yourhandle  edit" version shown when the user
+   has already picked one. Switches to the inline-form on edit. */
+.handle-display{display:flex;align-items:baseline;gap:14px;padding:4px 0;}
+.handle-display .handle-value{font-family:var(--display);font-weight:700;font-size:15px;color:var(--ink);}
+.handle-display[hidden]{display:none;}
 
 .account-logout{margin-top:6px;font-size:12px;}
 .btn-link{
@@ -507,5 +543,54 @@ a.lb-row:hover{border-color:rgba(244,162,59,.32);background:var(--surface-2);}
 
 a.puzzle-no{text-decoration:none;}
 a.puzzle-no:hover{color:var(--ink);}
+
+/* ---- /privacy ---- */
+.privacy{display:block;}
+.privacy-header{margin:22px 0 28px;}
+.privacy-updated{
+  font-family:var(--mono);font-size:12px;color:var(--muted);
+  margin-top:4px;
+}
+.privacy-section{margin:0 0 26px;}
+.privacy-section h3{
+  font-family:var(--display);font-weight:700;font-size:17px;line-height:1.3;
+  letter-spacing:-.01em;color:var(--ink);margin:0 0 8px;
+}
+.privacy-section p{
+  font-family:var(--body);font-size:14px;line-height:1.55;color:var(--ink);
+  margin:0 0 10px;
+}
+.privacy-section p.muted{color:var(--muted);font-size:13px;}
+.privacy-section ul{
+  list-style:none;padding:0;margin:6px 0 12px;
+}
+.privacy-section li{
+  font-family:var(--body);font-size:14px;line-height:1.55;color:var(--ink);
+  padding:4px 0 4px 14px;position:relative;
+}
+.privacy-section li::before{
+  content:"·";color:var(--honk);position:absolute;left:0;top:2px;
+  font-weight:700;font-size:16px;
+}
+.privacy-section li b{font-weight:600;}
+.privacy-section code{
+  font-family:var(--mono);font-size:13px;color:var(--honk);
+  background:rgba(244,162,59,.06);padding:1px 5px;border-radius:4px;
+}
+.privacy-section a.link{color:var(--honk);text-decoration:none;}
+.privacy-section a.link:hover{text-decoration:underline;}
+
+.privacy-table{margin:8px 0 12px;border-top:1px solid var(--line);}
+.privacy-table-row{
+  display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+  padding:9px 0;border-bottom:1px solid var(--line);
+}
+.privacy-table-row .label{
+  font-family:var(--mono);font-size:11px;color:var(--muted);
+  letter-spacing:.06em;
+}
+.privacy-table-row .value{
+  font-family:var(--body);font-size:13px;color:var(--ink);text-align:right;
+}
 
 @media (prefers-reduced-motion: reduce){*{animation:none !important;transition:none !important;}}

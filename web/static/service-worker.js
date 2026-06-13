@@ -9,9 +9,9 @@
 // users who already installed.
 const CACHE = 'bbg-shell-v3';
 
-// IMPORTANT: never cache "/" or any /play/* page. Those carry server-rendered
-// state (current round, play token, mode). Caching them would freeze a stale
-// view and defeat the anti-cheat story.
+// IMPORTANT: never cache "/". It carries server-rendered state (current
+// round, play token, mode, completion status). Caching would freeze a
+// stale view and defeat the anti-cheat story.
 //
 // Static CSS/JS aren't pre-cached anymore: the server emits content-hashed
 // URLs ("/static/css/app.css?v=<hash>"), so a content change produces a new
@@ -36,11 +36,9 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-  // Never intercept API, play pages, or the root. Labels and play state
-  // must always be fresh from the server.
-  if (url.pathname.startsWith('/api/') ||
-      url.pathname.startsWith('/play/') ||
-      url.pathname === '/') {
+  // Never intercept API or the root. Labels and play state must always
+  // be fresh from the server.
+  if (url.pathname.startsWith('/api/') || url.pathname === '/') {
     return;
   }
   if (url.pathname.startsWith('/static/') || url.pathname === '/manifest.json') {

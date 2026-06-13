@@ -82,7 +82,7 @@ func resolveOrMint(ctx context.Context, d *db.DB, secret []byte, presented, ua s
 	}
 
 	// Mint.
-	userID, err := d.CreateAnonymousUser(ctx)
+	userID, handle, err := d.CreateAnonymousUser(ctx)
 	if err != nil {
 		return nil, "", err
 	}
@@ -92,7 +92,7 @@ func resolveOrMint(ctx context.Context, d *db.DB, secret []byte, presented, ua s
 		return nil, "", err
 	}
 	signed := wrapCookie(secret, cleartext)
-	return &db.User{ID: userID, Role: "player", SpotterELO: 1200}, signed, nil
+	return &db.User{ID: userID, Handle: &handle, Role: "player", SpotterELO: 1200}, signed, nil
 }
 
 // newCookieValue returns 32 random bytes, base64url-encoded. The cleartext

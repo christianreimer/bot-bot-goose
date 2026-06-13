@@ -22,12 +22,12 @@ func (s *Server) handleDecoyShare(w http.ResponseWriter, r *http.Request) {
 	rawShort := chi.URLParam(r, "short")
 	short, err := share.ParseShortID(rawShort)
 	if err != nil {
-		http.NotFound(w, r)
+		s.renderNotFound(w, r)
 		return
 	}
 	pd, err := s.cfg.DB.DecoyByShortID(r.Context(), short)
 	if err != nil {
-		http.NotFound(w, r)
+		s.renderNotFound(w, r)
 		return
 	}
 

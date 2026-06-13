@@ -14,15 +14,16 @@ import (
 )
 
 // Harvest is the Phase-0 collection campaign surface (design doc §3). The
-// deck is 20 under-supplied prompts at a time. Submissions land in
-// pre_launch_submissions — they DO NOT flow into the live game or the
-// composer's bandit. Manual promotion (today: a SQL one-liner) is the
-// only path from "harvested" to "in-game decoy."
+// deck is 21 under-supplied prompts at a time, laid out as a 3-column ×
+// 7-row grid. Submissions land in pre_launch_submissions — they DO NOT
+// flow into the live game or the composer's bandit. Manual promotion
+// (today: a SQL one-liner) is the only path from "harvested" to
+// "in-game decoy."
 const (
-	harvestDeckSize = 20
+	harvestDeckSize = 21
 
 	// Per-device + per-IP rate limits, looser than the regular decoy
-	// endpoint because a 20-card sitting is the intended use. 30/hour
+	// endpoint because a 21-card sitting is the intended use. 30/hour
 	// gives the user comfortable room to finish a deck in one go; the
 	// per-IP ceiling tolerates shared NAT.
 	harvestSubmitDeviceCapacity = 30

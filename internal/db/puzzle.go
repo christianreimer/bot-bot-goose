@@ -299,6 +299,370 @@ func (d *DB) InsertDecoy(ctx context.Context, promptID uuid.UUID, userID *uuid.U
 	return id, err
 }
 
+// ErrHasPlays is returned by destructive puzzle ops when at least one play
+// row exists. Mutating an answered puzzle would corrupt historical results
+// (the slot_permutation refers to canonical answer ordinals at play time).
+var ErrHasPlays = errors.New("puzzle has plays; refuse to mutate")
+
+// ErrReferenced is returned by `prompt delete` when puzzle_rounds reference it.
+// Caller should suggest `prompt retire` instead.
+var ErrReferenced = errors.New("row is referenced by another table")
+
+// PuzzleListOpts filters and bounds a daily-puzzles listing.
+type PuzzleListOpts struct {
+	From        *time.Time // inclusive; nil means no lower bound
+	To          *time.Time // inclusive; nil means no upper bound
+	IncludePast bool       // if false, From defaults to today UTC
+	Limit       int        // 0 means no limit
+}
+
+// ListDailyPuzzles returns puzzles ordered by puzzle_date ASC (upcoming first).
+func (d *DB) ListDailyPuzzles(ctx context.Context, opts PuzzleListOpts) ([]DailyPuzzle, error) {
+	q := `SELECT id, puzzle_number, puzzle_date, mode, frozen_at, theme
+	        FROM daily_puzzles WHERE 1=1`
+	args := []any{}
+	if opts.From != nil {
+		args = append(args, *opts.From)
+		q += fmt.Sprintf(" AND puzzle_date >= $%d", len(args))
+	} else if !opts.IncludePast {
+		today := time.Now().UTC().Truncate(24 * time.Hour)
+		args = append(args, today)
+		q += fmt.Sprintf(" AND puzzle_date >= $%d", len(args))
+	}
+	if opts.To != nil {
+		args = append(args, *opts.To)
+		q += fmt.Sprintf(" AND puzzle_date <= $%d", len(args))
+	}
+	q += " ORDER BY puzzle_date ASC, puzzle_number ASC"
+	if opts.Limit > 0 {
+		args = append(args, opts.Limit)
+		q += fmt.Sprintf(" LIMIT $%d", len(args))
+	}
+	rows, err := d.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DailyPuzzle
+	for rows.Next() {
+		var p DailyPuzzle
+		if err := rows.Scan(&p.ID, &p.PuzzleNumber, &p.PuzzleDate, &p.Mode, &p.FrozenAt, &p.Theme); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// PuzzleByDate finds the puzzle for an exact date. Useful for `--date` lookups.
+func (d *DB) PuzzleByDate(ctx context.Context, date time.Time) (*DailyPuzzle, error) {
+	const q = `SELECT id, puzzle_number, puzzle_date, mode, frozen_at, theme
+	             FROM daily_puzzles WHERE puzzle_date = $1 LIMIT 1`
+	row := d.QueryRow(ctx, q, date)
+	p := &DailyPuzzle{}
+	if err := row.Scan(&p.ID, &p.PuzzleNumber, &p.PuzzleDate, &p.Mode, &p.FrozenAt, &p.Theme); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return p, nil
+}
+
+// PuzzleHasPlays reports whether any plays row references the puzzle.
+func (d *DB) PuzzleHasPlays(ctx context.Context, puzzleID uuid.UUID) (bool, error) {
+	var n int
+	err := d.QueryRow(ctx, `SELECT count(*) FROM plays WHERE daily_puzzle_id = $1`, puzzleID).Scan(&n)
+	return n > 0, err
+}
+
+// UpdateDailyPuzzle patches mutable fields on an unplayed puzzle. Nil pointers
+// leave the field untouched. Returns ErrHasPlays if any play exists.
+func (d *DB) UpdateDailyPuzzle(ctx context.Context, n int32, mode *Mode, theme *string, date *time.Time) error {
+	p, err := d.PuzzleByNumber(ctx, n)
+	if err != nil {
+		return err
+	}
+	played, err := d.PuzzleHasPlays(ctx, p.ID)
+	if err != nil {
+		return err
+	}
+	if played {
+		return ErrHasPlays
+	}
+	if mode == nil && theme == nil && date == nil {
+		return nil
+	}
+	// COALESCE keeps existing values when the corresponding arg is nil.
+	var modeArg any
+	if mode != nil {
+		modeArg = string(*mode)
+	}
+	_, err = d.Exec(ctx, `
+		UPDATE daily_puzzles
+		   SET mode  = COALESCE($2::puzzle_mode, mode),
+		       theme = COALESCE($3, theme),
+		       puzzle_date = COALESCE($4::date, puzzle_date)
+		 WHERE puzzle_number = $1
+	`, n, modeArg, theme, date)
+	return err
+}
+
+// DeleteDailyPuzzle removes a puzzle (cascade drops its rounds + answers).
+// Refuses if any play references it.
+func (d *DB) DeleteDailyPuzzle(ctx context.Context, n int32) error {
+	p, err := d.PuzzleByNumber(ctx, n)
+	if err != nil {
+		return err
+	}
+	played, err := d.PuzzleHasPlays(ctx, p.ID)
+	if err != nil {
+		return err
+	}
+	if played {
+		return ErrHasPlays
+	}
+	_, err = d.Exec(ctx, `DELETE FROM daily_puzzles WHERE puzzle_number = $1`, n)
+	return err
+}
+
+// OverrideAnswerText replaces the denormalized text snapshot for the answer at
+// canonical position `slot` (0..3) within a round. Canonical order is by id
+// ASC — same order AnswersForRound returns. Refuses if the puzzle has plays.
+func (d *DB) OverrideAnswerText(ctx context.Context, puzzleID, roundID uuid.UUID, slot int, text string) error {
+	played, err := d.PuzzleHasPlays(ctx, puzzleID)
+	if err != nil {
+		return err
+	}
+	if played {
+		return ErrHasPlays
+	}
+	rows, err := d.Query(ctx, `SELECT id FROM puzzle_round_answers WHERE round_id = $1 ORDER BY id`, roundID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if slot < 0 || slot >= len(ids) {
+		return fmt.Errorf("slot %d out of range [0,%d)", slot, len(ids))
+	}
+	_, err = d.Exec(ctx, `UPDATE puzzle_round_answers SET answer_text = $1 WHERE id = $2`, text, ids[slot])
+	return err
+}
+
+// OverrideAnswerContent swaps the underlying content at canonical slot `slot`
+// in `roundID` to a new bot_candidate or decoy_submission. Exactly one of
+// botID / decoyID must be non-nil. The row's content_kind, FK, author, and
+// text snapshot are all updated to match the new source. Refuses on has_plays
+// (would corrupt the slot_permutation of every prior play).
+//
+// The caller is responsible for verifying that the new source is approved and
+// belongs to the round's prompt — puzzle.PickBotsByIDs / PickDecoysByIDs are
+// the canonical validators.
+func (d *DB) OverrideAnswerContent(ctx context.Context, puzzleID, roundID uuid.UUID, slot int, botID, decoyID *uuid.UUID) error {
+	if (botID == nil) == (decoyID == nil) {
+		return fmt.Errorf("exactly one of botID / decoyID must be set")
+	}
+	played, err := d.PuzzleHasPlays(ctx, puzzleID)
+	if err != nil {
+		return err
+	}
+	if played {
+		return ErrHasPlays
+	}
+	rows, err := d.Query(ctx, `SELECT id FROM puzzle_round_answers WHERE round_id = $1 ORDER BY id`, roundID)
+	if err != nil {
+		return err
+	}
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if slot < 0 || slot >= len(ids) {
+		return fmt.Errorf("slot %d out of range [0,%d)", slot, len(ids))
+	}
+
+	var (
+		contentKind  string
+		text         string
+		authorUserID *uuid.UUID
+	)
+	if botID != nil {
+		contentKind = string(ContentBot)
+		if err := d.QueryRow(ctx, `SELECT text FROM bot_candidates WHERE id = $1`, *botID).Scan(&text); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+	} else {
+		contentKind = string(ContentDecoy)
+		if err := d.QueryRow(ctx, `SELECT text, user_id FROM decoy_submissions WHERE id = $1 AND deleted_at IS NULL`, *decoyID).Scan(&text, &authorUserID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+	}
+
+	_, err = d.Exec(ctx, `
+		UPDATE puzzle_round_answers
+		   SET content_kind     = $1,
+		       bot_candidate_id = $2,
+		       decoy_id         = $3,
+		       author_user_id   = $4,
+		       answer_text      = $5
+		 WHERE id = $6
+	`, contentKind, botID, decoyID, authorUserID, text, ids[slot])
+	return err
+}
+
+// --- prompts -----------------------------------------------------------------
+
+type Prompt struct {
+	ID         uuid.UUID
+	Text       string
+	Theme      *string
+	RetiredAt  *time.Time
+	CreatedAt  time.Time
+}
+
+// InsertPrompt creates a prompt with optional theme. Returns the new id.
+// Unlike UpsertPrompt, this does not deduplicate.
+func (d *DB) InsertPrompt(ctx context.Context, text string, theme *string) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := d.QueryRow(ctx,
+		`INSERT INTO prompts (text, theme) VALUES ($1, $2) RETURNING id`,
+		text, theme,
+	).Scan(&id)
+	return id, err
+}
+
+// PromptByID loads a prompt or returns ErrNotFound.
+func (d *DB) PromptByID(ctx context.Context, id uuid.UUID) (*Prompt, error) {
+	const q = `SELECT id, text, theme, retired_at, created_at FROM prompts WHERE id = $1`
+	row := d.QueryRow(ctx, q, id)
+	p := &Prompt{}
+	if err := row.Scan(&p.ID, &p.Text, &p.Theme, &p.RetiredAt, &p.CreatedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return p, nil
+}
+
+// ListPrompts returns prompts; excludes retired by default.
+func (d *DB) ListPrompts(ctx context.Context, includeRetired bool, theme *string, limit int) ([]Prompt, error) {
+	q := `SELECT id, text, theme, retired_at, created_at FROM prompts WHERE 1=1`
+	args := []any{}
+	if !includeRetired {
+		q += " AND retired_at IS NULL"
+	}
+	if theme != nil {
+		args = append(args, *theme)
+		q += fmt.Sprintf(" AND theme = $%d", len(args))
+	}
+	q += " ORDER BY created_at DESC"
+	if limit > 0 {
+		args = append(args, limit)
+		q += fmt.Sprintf(" LIMIT $%d", len(args))
+	}
+	rows, err := d.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Prompt
+	for rows.Next() {
+		var p Prompt
+		if err := rows.Scan(&p.ID, &p.Text, &p.Theme, &p.RetiredAt, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// UpdatePrompt patches mutable fields. Nil leaves the field unchanged.
+func (d *DB) UpdatePrompt(ctx context.Context, id uuid.UUID, text *string, theme *string) error {
+	_, err := d.Exec(ctx, `
+		UPDATE prompts
+		   SET text  = COALESCE($2, text),
+		       theme = COALESCE($3, theme)
+		 WHERE id = $1
+	`, id, text, theme)
+	return err
+}
+
+// RetirePrompt sets retired_at = NOW() if not already retired.
+func (d *DB) RetirePrompt(ctx context.Context, id uuid.UUID) error {
+	tag, err := d.Exec(ctx, `UPDATE prompts SET retired_at = NOW() WHERE id = $1 AND retired_at IS NULL`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		// either not found or already retired — distinguish.
+		if _, err := d.PromptByID(ctx, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DeletePrompt hard-deletes a prompt. Refuses with ErrReferenced if any
+// puzzle_rounds reference it.
+func (d *DB) DeletePrompt(ctx context.Context, id uuid.UUID) error {
+	var refs int
+	if err := d.QueryRow(ctx, `SELECT count(*) FROM puzzle_rounds WHERE prompt_id = $1`, id).Scan(&refs); err != nil {
+		return err
+	}
+	if refs > 0 {
+		return ErrReferenced
+	}
+	tag, err := d.Exec(ctx, `DELETE FROM prompts WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UserIDByEmail resolves a user by email, used to map --reviewer-email flags
+// to moderation_reviews.reviewer_user_id (which is NOT NULL).
+func (d *DB) UserIDByEmail(ctx context.Context, email string) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := d.QueryRow(ctx, `SELECT id FROM users WHERE email = $1 AND deleted_at IS NULL`, email).Scan(&id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return uuid.Nil, ErrNotFound
+		}
+		return uuid.Nil, err
+	}
+	return id, nil
+}
+
 // UpsertArchetype creates-or-updates an archetype by slug.
 func (d *DB) UpsertArchetype(ctx context.Context, slug, name, tell string, difficulty int16) (uuid.UUID, error) {
 	var id uuid.UUID

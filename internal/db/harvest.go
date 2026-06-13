@@ -18,17 +18,20 @@ type HarvestPrompt struct {
 // HarvestDeck returns up to `limit` prompts that:
 //
 //   - are not retired,
-//   - have FEWER THAN 5 rows in pre_launch_submissions (under-supplied),
-//   - have no row from this device in pre_launch_submissions (don't repeat).
+//   - have FEWER THAN 5 live (non-rejected) rows in pre_launch_submissions
+//     (under-supplied),
+//   - have no row from this device in pre_launch_submissions (don't repeat;
+//     a rejected row still counts as "this device already answered").
 //
 // Order is random so concurrent harvesters don't all hit the same prompts.
-// At v1 scale the CTE is cheap; the index added in 0005 keeps the count
-// query indexed.
+// At v1 scale the CTE is cheap; the partial index pre_launch_live_prompt_idx
+// (migration 0006) keeps the filtered count query indexed.
 func (d *DB) HarvestDeck(ctx context.Context, userID uuid.UUID, limit int) ([]HarvestPrompt, error) {
 	const q = `
 		WITH counts AS (
 		    SELECT prompt_id, count(*) AS n
 		      FROM pre_launch_submissions
+		     WHERE rejected_at IS NULL
 		     GROUP BY prompt_id
 		)
 		SELECT p.id, p.text

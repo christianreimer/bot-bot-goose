@@ -122,7 +122,7 @@ func RenderResultOG(r ResultOG) ([]byte, error) {
 	}
 
 	// Footer.
-	footer := "botbotgoose.app · spot the AI hiding among real humans"
+	footer := "botbotgoose.fun · spot the AI hiding among humans"
 	drawStringCentered(img, face18, footer, OGWidth/2, OGHeight-44, colorMuted)
 
 	var buf bytes.Buffer
@@ -177,10 +177,10 @@ func RenderHarvestOG() ([]byte, error) {
 
 	// Sub — the campaign tagline, two lines.
 	drawString(img, face28, "Type like a person.", 320, 348, colorMuted)
-	drawString(img, face28, "Your answers become tomorrow's traps.", 320, 392, colorMuted)
+	drawString(img, face28, "Your answers become future traps.", 320, 392, colorMuted)
 
 	// Footer line, brand-anchored.
-	drawString(img, face18, "botbotgoose.app/harvest", 320, OGHeight-58, colorHonk)
+	drawString(img, face18, "botbotgoose.fun/harvest", 320, OGHeight-58, colorHonk)
 
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {

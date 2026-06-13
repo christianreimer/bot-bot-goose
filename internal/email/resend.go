@@ -14,7 +14,7 @@ import (
 // SDK to keep deps minimal — the API surface we use is one POST.
 type ResendSender struct {
 	APIKey string
-	From   string // e.g. "Bot Bot Goose <noreply@botbotgoose.app>"
+	From   string // e.g. "Bot Bot Goose <contact@botbotgoose.fun>"
 	Client *http.Client
 }
 

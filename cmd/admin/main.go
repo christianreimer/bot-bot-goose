@@ -1,12 +1,29 @@
-// bbg-admin — one-shot admin tasks. Subcommands keep ops scripts small.
+// bbg-admin — admin and content-management subcommands.
+//
+// One-shots:
 //
 //	bbg-admin seed                           # insert prototype content as puzzle #001
 //	bbg-admin promote --email=... --role=... # role change with audit log
 //	bbg-admin vapid-gen                      # print a fresh VAPID key pair
+//	bbg-admin import path/to/content.json    # bulk import prompts/bots/decoys/puzzles
+//	bbg-admin rollup                         # nightly leaderboard rollup
+//
+// Content-management groups (agent-operable — JSON stdout, --table opt-in):
+//
+//	bbg-admin puzzle  <list|show|create|compose|edit|set-round|set-answer|delete|schedule>
+//	bbg-admin decoy   <list|show|review|bulk-review>
+//	bbg-admin bot     <list|show|review|bulk-review>
+//	bbg-admin prompt  <list|show|create|edit|retire|delete>
+//	bbg-admin harvest <list|show|review|bulk-review|prompts>
+//	bbg-admin stats   <overview|players|decoys|harvest>
+//
+// See cmd/admin/README.md for the JSON shapes and the DigitalOcean connection
+// recipe.
 package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -23,7 +40,9 @@ func main() {
 	cmd := os.Args[1]
 	os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
 
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	// Wrap stderr so any password that slips through a log/error message gets
+	// redacted before hitting the terminal.
+	log := slog.New(slog.NewTextHandler(safeIOWriter{w: os.Stderr}, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	switch cmd {
 	case "seed":
@@ -36,6 +55,18 @@ func main() {
 		mustRun(log, runImport)
 	case "rollup":
 		mustRun(log, runRollup)
+	case "puzzle":
+		mustRun(log, runPuzzle)
+	case "decoy":
+		mustRun(log, runDecoy)
+	case "prompt":
+		mustRun(log, runPrompt)
+	case "harvest":
+		mustRun(log, runHarvest)
+	case "bot":
+		mustRun(log, runBot)
+	case "stats":
+		mustRun(log, runStats)
 	default:
 		usage()
 		os.Exit(2)
@@ -50,15 +81,30 @@ func usage() {
   vapid-gen  Print a fresh VAPID key pair for BBG_VAPID_*.
   import     Load a content JSON file (prompts + bots + decoys + puzzles).
              bbg-admin import path/to/content.json
-  rollup     Recompute forger_rankings from decoy_daily_stats. Nightly cron target.`)
+  rollup     Recompute forger_rankings from decoy_daily_stats. Nightly cron target.
+  puzzle     Manage daily puzzles (list/show/create/compose/edit/set-round/set-answer/delete/schedule).
+  decoy      Manage user-submitted answers (list/show/review/bulk-review).
+  bot        Manage LLM-generated bot candidates (list/show/review/bulk-review).
+  prompt     Manage prompts (list/show/create/edit/retire/delete).
+  harvest    Review /harvest submissions in pre_launch_submissions (list/show/review/bulk-review/prompts).
+  stats      Usage reporting (overview/players/decoys/harvest).
+
+See cmd/admin/README.md for JSON output shapes and the DigitalOcean connection recipe.`)
 }
 
 func mustRun(log *slog.Logger, fn func(context.Context, *slog.Logger) error) {
 	ctx := context.Background()
-	if err := fn(ctx, log); err != nil {
-		log.Error("admin", "err", err)
+	err := fn(ctx, log)
+	if err == nil {
+		return
+	}
+	// errorEmitted means the runner already wrote a JSON envelope to stderr —
+	// don't double-log; just exit non-zero.
+	if errors.Is(err, errorEmitted) {
 		os.Exit(1)
 	}
+	log.Error("admin", "err", err)
+	os.Exit(1)
 }
 
 func runPromote(ctx context.Context, log *slog.Logger) error {

@@ -31,7 +31,7 @@ services:
       BBG_LISTEN: ":8080"
       BBG_DB_URL: "postgres://${POSTGRES_USER:-bbg}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-bbg}?sslmode=disable"
       BBG_SESSION_KEY: ${BBG_SESSION_KEY:?BBG_SESSION_KEY required — generate 32+ random bytes hex}
-      BBG_BASE_URL: ${BBG_BASE_URL:-https://botbotgoose.app}
+      BBG_BASE_URL: ${BBG_BASE_URL:-https://botbotgoose.fun}
       BBG_VAPID_PUBLIC: ${BBG_VAPID_PUBLIC:-}
       BBG_VAPID_PRIVATE: ${BBG_VAPID_PRIVATE:-}
       BBG_ANTHROPIC_API_KEY: ${BBG_ANTHROPIC_API_KEY:-}

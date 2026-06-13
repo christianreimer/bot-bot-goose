@@ -28,6 +28,17 @@ func (s *Server) renderHTML(w http.ResponseWriter, status int, name string, data
 	_, _ = w.Write(buf.Bytes())
 }
 
+// renderNotFound serves the themed 404 page. Used by chi's NotFound hook
+// for unmatched routes AND by handlers that look up a short ID and find
+// nothing (decoy_share, result_share, play_handlers). Replaces the
+// stdlib's bare-text http.NotFound so users always land on a branded
+// surface with a clear "play today" path back.
+func (s *Server) renderNotFound(w http.ResponseWriter, _ *http.Request) {
+	s.renderHTML(w, http.StatusNotFound, "pages/not_found.html", map[string]any{
+		"PuzzleNumber": int32(0),
+	})
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	body, err := json.Marshal(v)
 	if err != nil {

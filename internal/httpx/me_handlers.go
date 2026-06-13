@@ -31,6 +31,8 @@ type meDecoyView struct {
 }
 
 // mePayoff is the §4 "312 people just accused you of being a bot" block.
+// Still consumed by decoyViewWithShare to build per-decoy share cards
+// (so all surfaces tell the same tier/rank story).
 type mePayoff struct {
 	Visible          bool   // hide entirely until any impressions exist
 	Eligible         bool   // false = under the leaderboard impressions gate
@@ -46,6 +48,22 @@ type mePayoff struct {
 	GateMin          int64
 }
 
+// standingCard is one row in the "Standings" block at the top of /me.
+// Two cards render: spotter + forger. Eligible=true means the user has
+// crossed the gate (≥3 completed plays for spotter; ≥100 impressions
+// for forger) and the headline stat is meaningful. Eligible=false
+// renders the "X to go" prompt instead.
+type standingCard struct {
+	Kind     string // "spotter" or "forger" — picks the row label + link
+	Href     string // /leaderboard/spotters or /leaderboard/forgers
+	Eligible bool
+	Rank     int    // 1-based; 0 when not yet eligible
+	OfTotal  int    // population size on the board
+	Tier     string // forger only; empty for spotter
+	Stat     string // headline number (e.g. "73%" or "42%")
+	Note     string // contextual line below
+}
+
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	u := users.FromContext(r.Context())
 	ctx := r.Context()
@@ -59,9 +77,10 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	}
 	streak, _ := s.cfg.DB.StreakFor(ctx, u.ID)
 
-	// Pull the user's payoff once; both the per-decoy share card and the
-	// big banner share its rank/tier so the totals tie out.
+	// Pull the user's payoff once; the per-decoy share card uses it so
+	// per-decoy totals tie out with the standings.
 	payoff := s.payoffFor(ctx, u)
+	standings := s.standingsFor(ctx, u, payoff)
 
 	views := make([]meDecoyView, 0, len(decoys))
 	for _, d := range decoys {
@@ -81,19 +100,80 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.renderHTML(w, http.StatusOK, "pages/me.html", map[string]any{
-		"PuzzleNumber":     int32(0), // header padding cosmetic
-		"Streak":           streak,
-		"Decoys":           views,
-		"Payoff":           payoff,
-		"BaseURL":          baseURL,
-		"SignedIn":         signedIn,
-		"Email":            emailDisplay,
-		"Handle":           handleDisplay,
-		"DisplayAnonymous": u.DisplayAnonymous,
+		"PuzzleNumber": int32(0), // header padding cosmetic
+		"Streak":       streak,
+		"Decoys":       views,
+		"Standings":    standings,
+		"BaseURL":      baseURL,
+		"SignedIn":     signedIn,
+		"Email":        emailDisplay,
+		"Handle":       handleDisplay,
 		// `?signed_in=1` after a successful magic-link consume — let the
 		// page show a one-time toast.
 		"JustSignedIn": r.URL.Query().Get("signed_in") == "1",
 	})
+}
+
+// standingsFor builds the spotter + forger card pair shown at the top
+// of /me. Order matters: spotter first (most users have plays before
+// they have decoys, so it's the more familiar surface). Each card
+// degrades to an "X to go" prompt when the user hasn't crossed the gate.
+func (s *Server) standingsFor(ctx context.Context, u *db.User, forger mePayoff) []standingCard {
+	const spotterMinPlays = 3
+	out := make([]standingCard, 0, 2)
+
+	// Spotter
+	spotter := standingCard{Kind: "spotter", Href: "/leaderboard/spotters"}
+	if r, err := s.cfg.DB.SpotterRankingFor(ctx, u.ID, spotterMinPlays); err == nil {
+		total, _ := s.cfg.DB.EligibleSpotterCount(ctx, spotterMinPlays)
+		spotter.Eligible = r.Rank > 0
+		spotter.Rank = r.Rank
+		spotter.OfTotal = total
+		spotter.Stat = fmt.Sprintf("%.0f%%", r.AvgScore)
+		if spotter.Eligible {
+			spotter.Note = fmt.Sprintf("Avg Bot-Dar across %d plays.", r.Plays)
+		} else {
+			need := spotterMinPlays - r.Plays
+			spotter.Note = fmt.Sprintf("%d more play%s to rank.", need, plural(need))
+		}
+	} else {
+		spotter.Note = "Finish 3 plays to appear here."
+	}
+	out = append(out, spotter)
+
+	// Forger
+	fc := standingCard{Kind: "forger", Href: "/leaderboard/forgers"}
+	if forger.Eligible {
+		fc.Eligible = true
+		fc.Rank = forger.Rank
+		fc.OfTotal = forger.OfTotal
+		fc.Tier = forger.Tier
+		fc.Stat = fmt.Sprintf("%d%%", forger.AdjustedPct)
+		if forger.NextTier != "" {
+			fc.Note = fmt.Sprintf("+%d beyond chance. %d fool%s to %s.",
+				forger.BeyondChance, forger.FoolsToNext, plural(forger.FoolsToNext), forger.NextTier)
+		} else {
+			fc.Note = fmt.Sprintf("+%d beyond chance. Top of the pond.", forger.BeyondChance)
+		}
+	} else if forger.Visible {
+		need := forger.GateMin - forger.TotalImpressions
+		if need < 1 {
+			need = 1
+		}
+		fc.Note = fmt.Sprintf("%d more impression%s to rank.", need, plural(int(need)))
+	} else {
+		fc.Note = "Plant a decoy from any result page to start."
+	}
+	out = append(out, fc)
+
+	return out
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 func decoyViewWithShare(d db.UserDecoy, payoff mePayoff, baseURL, shareURL string) meDecoyView {
@@ -207,7 +287,10 @@ func (s *Server) handleLeaderboardForgers(w http.ResponseWriter, r *http.Request
 	}
 	total, _ := s.cfg.DB.EligibleForgerCount(r.Context(), gate)
 	var teaser map[string]any
-	if top, err := s.cfg.DB.TopSpotters(r.Context(), 1, 3); err == nil && len(top) > 0 {
+	top, err := s.cfg.DB.TopSpotters(r.Context(), 1, 3)
+	if err != nil {
+		s.cfg.Logger.Warn("forgers page: top-spotter teaser query failed", "err", err)
+	} else if len(top) > 0 {
 		teaser = map[string]any{
 			"Handle":   top[0].Handle,
 			"AvgScore": fmt.Sprintf("%.0f%%", top[0].AvgScore),
@@ -265,7 +348,10 @@ func (s *Server) handleLeaderboardSpotters(w http.ResponseWriter, r *http.Reques
 	}
 	gate := int64(leaderboard.MinImpressionsEligible)
 	var teaser map[string]any
-	if top, err := s.cfg.DB.TopForgers(r.Context(), 1, gate); err == nil && len(top) > 0 {
+	top, err := s.cfg.DB.TopForgers(r.Context(), 1, gate)
+	if err != nil {
+		s.cfg.Logger.Warn("spotters page: top-forger teaser query failed", "err", err)
+	} else if len(top) > 0 {
 		teaser = map[string]any{
 			"Handle":      top[0].Handle,
 			"Tier":        top[0].Tier,

@@ -264,7 +264,15 @@ func (s *Server) handlePatchHandle(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusBadRequest, "bad_handle", "3–20 chars, letters/digits/_/- only")
 		return
 	}
-	if reservedHandles[strings.ToLower(h)] {
+	lower := strings.ToLower(h)
+	// AnonymousGoose<n> is the auto-assigned-handle namespace (migration
+	// 0007). Reserving the lowercase prefix prevents a user from manually
+	// picking a value that would later collide with a freshly minted one.
+	if strings.HasPrefix(lower, "anonymousgoose") {
+		writeJSONErr(w, http.StatusBadRequest, "reserved", "that handle is reserved")
+		return
+	}
+	if reservedHandles[lower] {
 		writeJSONErr(w, http.StatusBadRequest, "reserved", "that handle is reserved")
 		return
 	}
@@ -293,24 +301,6 @@ func validHandle(h string) bool {
 		}
 	}
 	return true
-}
-
-type displayAnonReq struct {
-	Anonymous bool `json:"anonymous"`
-}
-
-func (s *Server) handlePatchAnonymous(w http.ResponseWriter, r *http.Request) {
-	var body displayAnonReq
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSONErr(w, http.StatusBadRequest, "bad_body", "")
-		return
-	}
-	u := users.FromContext(r.Context())
-	if err := s.cfg.DB.SetDisplayAnonymous(r.Context(), u.ID, body.Anonymous); err != nil {
-		writeJSONErr(w, http.StatusInternalServerError, "db", err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]bool{"anonymous": body.Anonymous})
 }
 
 // emailHash is a 64-bit short hash of an email, used in log lines so we can

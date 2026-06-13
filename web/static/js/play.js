@@ -140,7 +140,10 @@
     if (res.completed) {
       next.textContent = 'See your result ▸';
       next.onclick = () => {
-        window.location.href = `/play/${res.puzzle_number}/result`;
+        // After completion, send the player back to "/", which renders the
+        // result branch when the server sees the play is done. The puzzle
+        // number isn't in the URL anymore (deliberate: today is today).
+        window.location.href = '/';
       };
     } else {
       next.textContent = 'Next round ▸';

@@ -16,12 +16,12 @@ func (s *Server) handleResultShare(w http.ResponseWriter, r *http.Request) {
 	rawShort := chi.URLParam(r, "short")
 	short, err := share.ParseShortID(rawShort)
 	if err != nil {
-		http.NotFound(w, r)
+		s.renderNotFound(w, r)
 		return
 	}
 	pp, err := s.cfg.DB.PlayByShortID(r.Context(), short)
 	if err != nil {
-		http.NotFound(w, r)
+		s.renderNotFound(w, r)
 		return
 	}
 
@@ -63,12 +63,12 @@ func (s *Server) handleResultShareOG(w http.ResponseWriter, r *http.Request) {
 	rawShort := chi.URLParam(r, "short")
 	short, err := share.ParseShortID(rawShort)
 	if err != nil {
-		http.NotFound(w, r)
+		s.renderNotFound(w, r)
 		return
 	}
 	pp, err := s.cfg.DB.PlayByShortID(r.Context(), short)
 	if err != nil {
-		http.NotFound(w, r)
+		s.renderNotFound(w, r)
 		return
 	}
 

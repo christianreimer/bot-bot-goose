@@ -6,7 +6,7 @@ import (
 )
 
 func TestDecoyReportPendingVariant(t *testing.T) {
-	c := DecoyReportCard(DecoyReport{Text: "a thing", Status: "pending"}, "https://botbotgoose.app/")
+	c := DecoyReportCard(DecoyReport{Text: "a thing", Status: "pending"}, "https://botbotgoose.fun/")
 	if !strings.Contains(c, "Planted") {
 		t.Errorf("pending card missing planted copy: %q", c)
 	}
@@ -16,14 +16,14 @@ func TestDecoyReportPendingVariant(t *testing.T) {
 }
 
 func TestDecoyReportLiveAwaiting(t *testing.T) {
-	c := DecoyReportCard(DecoyReport{Text: "a thing", Status: "approved", Impressions: 0}, "botbotgoose.app")
+	c := DecoyReportCard(DecoyReport{Text: "a thing", Status: "approved", Impressions: 0}, "botbotgoose.fun")
 	if !strings.Contains(c, "first impressions") {
 		t.Errorf("zero-impression card missing copy: %q", c)
 	}
 }
 
 func TestDecoyReportFlopReframesWarmly(t *testing.T) {
-	c := DecoyReportCard(DecoyReport{Text: "a thing", Status: "approved", RawPct: 9, Impressions: 312, Fooled: 28}, "botbotgoose.app")
+	c := DecoyReportCard(DecoyReport{Text: "a thing", Status: "approved", RawPct: 9, Impressions: 312, Fooled: 28}, "botbotgoose.fun")
 	if !strings.Contains(c, "Too human") {
 		t.Errorf("flop must reframe warmly: %q", c)
 	}
@@ -37,7 +37,7 @@ func TestDecoyReportPayoffShowsRankWhenEligible(t *testing.T) {
 		Text: "a thing", Status: "approved",
 		RawPct: 47, Impressions: 660, Fooled: 312, BeyondChance: 247,
 		Eligible: true, Rank: 4, OfTotal: 1208, Tier: "Forger",
-	}, "botbotgoose.app")
+	}, "botbotgoose.fun")
 	if !strings.Contains(c, "47%") {
 		t.Errorf("payoff missing raw pct: %q", c)
 	}

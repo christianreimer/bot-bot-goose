@@ -83,7 +83,7 @@ type ForgerLeaderboardRow struct {
 func (d *DB) TopForgers(ctx context.Context, n int, gate int64) ([]ForgerLeaderboardRow, error) {
 	rows, err := d.Query(ctx, `
 		SELECT u.id,
-		       CASE WHEN u.display_anonymous OR u.handle IS NULL OR u.handle = ''
+		       CASE WHEN u.handle IS NULL OR u.handle = ''
 		            THEN 'anonymous' ELSE u.handle END,
 		       fr.adjusted_fool_rate,
 		       fr.tier,
@@ -137,14 +137,14 @@ type SpotterLeaderboardRow struct {
 func (d *DB) TopSpotters(ctx context.Context, n int, minPlays int) ([]SpotterLeaderboardRow, error) {
 	rows, err := d.Query(ctx, `
 		SELECT u.id,
-		       CASE WHEN u.display_anonymous OR u.handle IS NULL OR u.handle = ''
+		       CASE WHEN u.handle IS NULL OR u.handle = ''
 		            THEN 'anonymous' ELSE u.handle END,
 		       AVG(p.score_pct)::float8 AS avg_score,
 		       count(*) AS plays
 		  FROM plays p
 		  JOIN users u ON u.id = p.user_id
 		 WHERE p.completed_at IS NOT NULL AND p.score_pct IS NOT NULL AND u.deleted_at IS NULL
-		 GROUP BY u.id, u.handle, u.display_anonymous
+		 GROUP BY u.id, u.handle
 		 HAVING count(*) >= $2
 		 ORDER BY avg_score DESC, plays DESC
 		 LIMIT $1
@@ -237,7 +237,7 @@ func (d *DB) DecoyByShortID(ctx context.Context, short string) (*PublicDecoy, er
 		       COALESCE(SUM(s.impressions)   FILTER (WHERE s.mode = 'find_the_human'), 0),
 		       COALESCE(SUM(s.picked_as_bot) FILTER (WHERE s.mode = 'find_the_human'), 0),
 		       ds.user_id,
-		       CASE WHEN u.display_anonymous OR u.handle IS NULL OR u.handle = ''
+		       CASE WHEN u.handle IS NULL OR u.handle = ''
 		            THEN '' ELSE u.handle END
 		  FROM decoy_submissions ds
 		  JOIN prompts p ON p.id = ds.prompt_id
@@ -245,7 +245,7 @@ func (d *DB) DecoyByShortID(ctx context.Context, short string) (*PublicDecoy, er
 		  LEFT JOIN decoy_daily_stats s ON s.decoy_id = ds.id
 		 WHERE replace(ds.id::text, '-', '') LIKE $1 || '%'
 		   AND ds.deleted_at IS NULL
-		 GROUP BY ds.id, ds.text, p.text, ds.status, ds.user_id, u.handle, u.display_anonymous
+		 GROUP BY ds.id, ds.text, p.text, ds.status, ds.user_id, u.handle
 		 LIMIT 1
 	`
 	row := d.QueryRow(ctx, q, short)
@@ -259,6 +259,70 @@ func (d *DB) DecoyByShortID(ctx context.Context, short string) (*PublicDecoy, er
 		return nil, err
 	}
 	return pd, nil
+}
+
+// SpotterRankingFor returns the user's row on the spotter leaderboard:
+// rank (1-based among users with ≥ minPlays), avg Bot-Dar, and play
+// count. Mirrors ForgerRankingFor in shape so /me can render both
+// standings with parallel data flow. Returns ErrNotFound only when the
+// user has zero completed scored plays; sub-gate users still get a row
+// back with Plays > 0 and Rank = 0 so the template can show
+// "X plays, need Y to rank."
+func (d *DB) SpotterRankingFor(ctx context.Context, userID uuid.UUID, minPlays int) (*SpotterLeaderboardRow, error) {
+	var r SpotterLeaderboardRow
+	err := d.QueryRow(ctx, `
+		WITH stats AS (
+		    SELECT u.id AS user_id,
+		           CASE WHEN u.handle IS NULL OR u.handle = ''
+		                THEN 'anonymous' ELSE u.handle END AS handle,
+		           AVG(p.score_pct)::float8 AS avg_score,
+		           count(*) AS plays
+		      FROM plays p
+		      JOIN users u ON u.id = p.user_id
+		     WHERE p.completed_at IS NOT NULL AND p.score_pct IS NOT NULL
+		       AND u.deleted_at IS NULL
+		     GROUP BY u.id, u.handle
+		),
+		ranked AS (
+		    SELECT user_id, handle, avg_score, plays,
+		           CASE WHEN plays >= $2 THEN
+		                row_number() OVER (
+		                    PARTITION BY (plays >= $2)
+		                    ORDER BY avg_score DESC, plays DESC
+		                )
+		           ELSE 0 END AS rk
+		      FROM stats
+		)
+		SELECT handle, avg_score, plays, rk
+		  FROM ranked
+		 WHERE user_id = $1
+	`, userID, minPlays).Scan(&r.Handle, &r.AvgScore, &r.Plays, &r.Rank)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	r.UserID = userID
+	return &r, nil
+}
+
+// EligibleSpotterCount tells the user what they're competing against on
+// the spotter board. Mirrors EligibleForgerCount.
+func (d *DB) EligibleSpotterCount(ctx context.Context, minPlays int) (int, error) {
+	var n int
+	err := d.QueryRow(ctx, `
+		SELECT count(*) FROM (
+		    SELECT p.user_id
+		      FROM plays p
+		      JOIN users u ON u.id = p.user_id
+		     WHERE p.completed_at IS NOT NULL AND p.score_pct IS NOT NULL
+		       AND u.deleted_at IS NULL
+		     GROUP BY p.user_id
+		    HAVING count(*) >= $1
+		) t
+	`, minPlays).Scan(&n)
+	return n, err
 }
 
 // ForgerRankingFor returns the user's current row + rank (1-based, among
@@ -276,7 +340,7 @@ func (d *DB) ForgerRankingFor(ctx context.Context, userID uuid.UUID, gate int64)
 		           ELSE 0 END AS rk
 		      FROM forger_rankings
 		)
-		SELECT CASE WHEN u.display_anonymous OR u.handle IS NULL OR u.handle = ''
+		SELECT CASE WHEN u.handle IS NULL OR u.handle = ''
 		            THEN 'anonymous' ELSE u.handle END,
 		       ranked.adjusted_fool_rate, ranked.tier,
 		       ranked.total_impressions, ranked.total_picked_as_bot, ranked.rk

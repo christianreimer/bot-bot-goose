@@ -51,13 +51,13 @@ func (d *DB) ConsumeMagicLink(ctx context.Context, tokenHash []byte, now time.Ti
 // UserByEmail returns the user bound to the given email, or ErrNotFound.
 func (d *DB) UserByEmail(ctx context.Context, email string) (*User, error) {
 	const q = `
-		SELECT id, handle, email, role, spotter_elo, display_anonymous, created_at
+		SELECT id, handle, email, role, spotter_elo, created_at
 		  FROM users
 		 WHERE email = $1 AND deleted_at IS NULL
 		 LIMIT 1
 	`
 	u := &User{}
-	if err := d.QueryRow(ctx, q, email).Scan(&u.ID, &u.Handle, &u.Email, &u.Role, &u.SpotterELO, &u.DisplayAnonymous, &u.CreatedAt); err != nil {
+	if err := d.QueryRow(ctx, q, email).Scan(&u.ID, &u.Handle, &u.Email, &u.Role, &u.SpotterELO, &u.CreatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -229,12 +229,6 @@ func (d *DB) SetHandle(ctx context.Context, userID uuid.UUID, handle string) err
 	if err != nil && isUniqueViolation(err) {
 		return ErrHandleTaken
 	}
-	return err
-}
-
-// SetDisplayAnonymous toggles the "one-tap anonymous" flag (design §12).
-func (d *DB) SetDisplayAnonymous(ctx context.Context, userID uuid.UUID, anon bool) error {
-	_, err := d.Exec(ctx, `UPDATE users SET display_anonymous = $2 WHERE id = $1`, userID, anon)
 	return err
 }
 
