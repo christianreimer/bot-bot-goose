@@ -171,13 +171,20 @@
       .map(p => decodeURIComponent(p[1]))[0];
   }
 
+  // The toast's visual lifecycle is driven by the CSS @keyframes toastShow
+  // animation (see app.css). JS only adds `.show` to trigger it. The
+  // setTimeout below is cleanup-only (drops the class so subsequent
+  // flashes restart cleanly); it is NOT what makes the chip disappear.
   let toastTimer;
-  function flash(msg, durationMs) {
+  function flash(msg) {
     const t = document.getElementById('toast');
     if (!t) return;
     t.textContent = msg;
+    // Re-trigger the animation by removing, reflowing, then re-adding.
+    t.classList.remove('show');
+    void t.offsetWidth;
     t.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('show'), durationMs || 2200);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2700);
   }
 })();

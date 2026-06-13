@@ -122,14 +122,17 @@
       .map(p => decodeURIComponent(p[1]))[0];
   }
 
+  // Visual dismissal lives in CSS (@keyframes toastShow). See app.css.
   let toastTimer;
   function flash(msg) {
     const t = document.getElementById('toast');
     if (!t) return;
     t.textContent = msg;
+    t.classList.remove('show');
+    void t.offsetWidth;
     t.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2700);
   }
 
   function verdictFor(outs, mode) {

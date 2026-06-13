@@ -211,13 +211,35 @@ footer small{color:var(--muted);font-family:var(--mono);font-size:11px;}
 .footer-link{color:var(--muted);font-family:var(--mono);font-size:11px;text-decoration:none;letter-spacing:.04em;}
 .footer-link:hover{color:var(--ink);}
 
+/* The toast chip is self-dismissing via a CSS animation that owns its
+   full lifecycle: fade-in, hold, fade-out. JS adds the `.show` class to
+   trigger the animation; it does NOT need to remove the class to make
+   the chip disappear. `animation-fill-mode: forwards` parks the toast
+   on its final invisible frame even if JS never gets a chance to clean
+   up. This is the third take at the "welcome back chip won't dismiss"
+   bug — moving the dismissal off the JS timer fixes it for good. */
 .toast{
-  position:fixed;bottom:calc(24px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%) translateY(20px);
+  position:fixed;bottom:calc(24px + env(safe-area-inset-bottom));left:50%;
+  transform:translateX(-50%) translateY(20px);
   background:var(--ink);color:var(--pond-deep);font-weight:600;font-size:13px;
-  padding:10px 18px;border-radius:99px;opacity:0;pointer-events:none;
-  transition:all .3s ease;font-family:var(--body);
+  padding:10px 18px;border-radius:99px;
+  opacity:0;pointer-events:none;font-family:var(--body);
 }
-.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+.toast.show{
+  animation:toastShow 2500ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes toastShow{
+  0%   {opacity:0;transform:translateX(-50%) translateY(20px);}
+  12%  {opacity:1;transform:translateX(-50%) translateY(0);}
+  88%  {opacity:1;transform:translateX(-50%) translateY(0);}
+  100% {opacity:0;transform:translateX(-50%) translateY(20px);}
+}
+/* Reduced-motion fallback: the global `*{animation:none}` rule below
+   would otherwise leave the toast permanently invisible. Snap it to
+   shown so the JS cleanup-timeout still dismisses it (instantly, no fade). */
+@media (prefers-reduced-motion: reduce){
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+}
 
 /* ---------- /me + leaderboards ---------- */
 .me-stage{align-items:stretch;}

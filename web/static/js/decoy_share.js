@@ -12,7 +12,11 @@
     const t = document.getElementById('toast');
     if (!t) return;
     t.textContent = result === 'shared' ? 'Shared.' : 'Report copied.';
+    // CSS @keyframes toastShow drives the visual lifecycle; the
+    // setTimeout below is cleanup so a re-tap can re-trigger.
+    t.classList.remove('show');
+    void t.offsetWidth;
     t.classList.add('show');
-    setTimeout(() => t.classList.remove('show'), 2200);
+    setTimeout(() => t.classList.remove('show'), 2700);
   });
 })();
