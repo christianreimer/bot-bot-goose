@@ -132,6 +132,63 @@ func RenderResultOG(r ResultOG) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// RenderHarvestOG produces the static unfurl card for the /harvest landing
+// page. No per-request data — the content is the campaign pitch only, so
+// callers can cache the output indefinitely. Editorial composition: small
+// wordmark, big hook line, the campaign tagline, route footer.
+func RenderHarvestOG() ([]byte, error) {
+	img := image.NewRGBA(image.Rect(0, 0, OGWidth, OGHeight))
+	fill(img, img.Bounds(), colorPondDeep)
+
+	// Gentle bleed of light at the top to match the in-app gradient.
+	fill(img, image.Rect(0, 0, OGWidth, 240), color.RGBA{0x1c, 0x33, 0x40, 0xff})
+
+	// Big honk dot on the left to anchor the eye — same role the wordmark
+	// emoji plays in-app, sized up for the poster context.
+	fillCircle(img, 180, OGHeight/2, 96, colorHonk)
+
+	face64, err := loadFace(72)
+	if err != nil {
+		return nil, err
+	}
+	defer face64.Close()
+	face28, err := loadFace(32)
+	if err != nil {
+		return nil, err
+	}
+	defer face28.Close()
+	face18, err := loadFace(22)
+	if err != nil {
+		return nil, err
+	}
+	defer face18.Close()
+	face14, err := loadFace(18)
+	if err != nil {
+		return nil, err
+	}
+	defer face14.Close()
+
+	// Kicker (the "department label" editorial move) and brand.
+	drawString(img, face14, "BOT BOT GOOSE", 320, 178, colorHonk)
+
+	// Headline. "Help build the goose" is the campaign hook — same string
+	// the page itself opens with.
+	drawString(img, face64, "Help build the goose.", 320, 274, colorInk)
+
+	// Sub — the campaign tagline, two lines.
+	drawString(img, face28, "Type like a person.", 320, 348, colorMuted)
+	drawString(img, face28, "Your answers become tomorrow's traps.", 320, 392, colorMuted)
+
+	// Footer line, brand-anchored.
+	drawString(img, face18, "botbotgoose.app/harvest", 320, OGHeight-58, colorHonk)
+
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 func outcomeColor(o game.Outcome) color.RGBA {
 	switch o {
 	case game.Green:

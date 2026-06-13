@@ -24,7 +24,15 @@ import (
 //       find_the_bot:   1 bot + 3 decoys
 //       find_the_human: 3 bots + 1 decoy
 type importDoc struct {
-	Puzzles []importPuzzle `json:"puzzles"`
+	Puzzles []importPuzzle  `json:"puzzles"`
+	Prompts []importPrompt  `json:"prompts"` // bare prompts (no decoys/bots) — used for the harvest campaign seed
+}
+
+// importPrompt is a bare prompt entry. No status; prompts have no moderation
+// state of their own (they're just questions). Theme is optional metadata.
+type importPrompt struct {
+	Text  string `json:"text"`
+	Theme string `json:"theme,omitempty"`
 }
 
 type importPuzzle struct {
@@ -82,12 +90,22 @@ func runImport(ctx context.Context, log *slog.Logger) error {
 		arche[a.Slug] = id
 	}
 
+	// Bare prompts. Idempotent — UpsertPrompt dedupes on exact text.
+	for _, p := range doc.Prompts {
+		if p.Text == "" {
+			continue
+		}
+		if _, err := d.UpsertPrompt(ctx, p.Text); err != nil {
+			return fmt.Errorf("prompt %q: %w", p.Text, err)
+		}
+	}
+
 	for _, p := range doc.Puzzles {
 		if err := importOnePuzzle(ctx, d, log, arche, p); err != nil {
 			return fmt.Errorf("puzzle %d: %w", p.PuzzleNumber, err)
 		}
 	}
-	log.Info("import complete", "puzzles", len(doc.Puzzles))
+	log.Info("import complete", "puzzles", len(doc.Puzzles), "prompts", len(doc.Prompts))
 	return nil
 }
 

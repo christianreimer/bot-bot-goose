@@ -2,9 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>{{ block "title" . }}Bot Bot Goose{{ end }}</title>
 <meta name="description" content="A daily game where you spot the AI hiding among real humans." />
+<!-- Tells iOS Safari (and Chrome) to paint its UI bars + the home-indicator
+     safe area with the brand's pond-deep color, not the browser default. -->
+<meta name="theme-color" content="#0e1a20" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <link rel="manifest" href="/manifest.json" />
 <link rel="icon" href="{{ asset "/static/icons/goose.svg" }}" type="image/svg+xml" />
 <link rel="stylesheet" href="{{ asset "/static/css/app.css" }}" />

@@ -154,6 +154,13 @@ func (s *Server) routes() {
 		r.Get("/r/{short}", s.handleResultShare)
 		r.Get("/r/{short}/og.png", s.handleResultShareOG)
 
+		// Phase-0 harvest campaign. Anonymous deck of under-supplied
+		// prompts; submissions land in pre_launch_submissions and do NOT
+		// auto-flow into the live game. See plans/harvest.
+		r.Get("/harvest", s.handleHarvest)
+		r.Get("/harvest/og.png", s.handleHarvestOG)
+		r.Post("/api/harvest/submit", s.handleHarvestSubmit)
+
 		// Magic-link sign-in. The GET is the email-tap path; the POST is
 		// the form that mails the link. Both run behind the session
 		// middleware so we know which device cookie to bind.

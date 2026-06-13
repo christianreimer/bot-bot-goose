@@ -21,7 +21,16 @@
 }
 
 *{box-sizing:border-box;margin:0;padding:0;}
-html,body{height:100%;}
+/* overflow-x: hidden on the root + body prevents any element (typically
+   the modal overlay or an aggressively-styled form) from causing the page
+   to scroll horizontally on iOS Safari when the keyboard opens.
+
+   background on html (not just body) covers the iOS Safari overscroll
+   bounce region and the area painted around the home-indicator / status
+   bar safe areas. Without it those zones show the browser default
+   (effectively white) and frame the page in unwanted light bands. */
+html,body{height:100%;overflow-x:hidden;}
+html{background:var(--pond-deep);}
 body{
   font-family:var(--body);
   background:
@@ -160,7 +169,11 @@ header{
 .decoy h3{font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:4px;}
 .decoy p{font-size:13px;color:var(--muted);margin-bottom:12px;line-height:1.45;}
 .decoy .nextprompt{color:var(--ink);font-style:italic;}
-textarea{width:100%;background:var(--pond-deep);border:1.5px solid var(--line);border-radius:11px;color:var(--ink);font-family:var(--body);font-size:14px;padding:11px;resize:vertical;min-height:66px;margin-bottom:10px;}
+/* font-size:16px is the iOS-Safari threshold below which the browser
+   auto-zooms into the input on focus — that zoom shoves the layout
+   sideways and produces the horizontal-scroll bug the user hit on
+   iPhone 15. 16px is the minimum where iOS leaves the page alone. */
+textarea{width:100%;background:var(--pond-deep);border:1.5px solid var(--line);border-radius:11px;color:var(--ink);font-family:var(--body);font-size:16px;padding:11px;resize:vertical;min-height:66px;margin-bottom:10px;}
 textarea:focus{outline:none;border-color:var(--honk);}
 .decoy-meta{display:flex;justify-content:space-between;align-items:center;margin-top:10px;}
 .decoy-meta small{color:var(--muted);font-family:var(--mono);font-size:11px;}
@@ -219,6 +232,154 @@ footer small{color:var(--muted);font-family:var(--mono);font-size:11px;}
 .lb-nav .nav-link{color:var(--honk);text-decoration:none;}
 .lb-nav .nav-link:hover{text-decoration:underline;}
 
+/* ---- /harvest (Phase-0 collection deck) ----
+   Layout: 4-column grid of face-down cards. Tapping a card expands it
+   in-place to span the full grid width and reveals its question + input.
+   On submit the card fades + scales out; remaining cards FLIP-animate
+   into their new positions via JS (see harvest.js dismissCard). */
+.harvest-stage{align-items:stretch;}
+.harvest-lede,
+.harvest-done{
+  background:var(--surface);border:1px solid var(--line);border-radius:16px;
+  padding:22px 22px 18px;margin-top:14px;
+}
+.harvest-sub{font-size:14px;line-height:1.45;color:var(--ink);margin:10px 0 6px;}
+.harvest-counter{
+  font-family:var(--mono);font-size:11px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--muted);
+  margin:14px 0 0;
+}
+.harvest-counter #counter{color:var(--honk);font-weight:700;}
+
+.card-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(94px, 1fr));
+  gap:10px;margin-top:18px;
+  counter-reset:harvestCard;
+}
+
+/* Each card. counter-increment paints "01", "02"… into .card-num via CSS. */
+.harvest-stage .card{
+  position:relative;background:var(--surface);
+  border:1px solid var(--line);border-radius:13px;padding:0;
+  counter-increment:harvestCard;
+  transition:opacity 250ms cubic-bezier(0.22, 1, 0.36, 1),
+             transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
+             background 200ms ease;
+}
+.harvest-stage .card:hover{background:var(--surface-2);}
+
+.card-face{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  width:100%;aspect-ratio:3/4;
+  background:transparent;border:none;color:var(--ink);cursor:pointer;
+  padding:10px;font-family:var(--display);
+}
+.card-mark{font-size:24px;line-height:1;filter:drop-shadow(0 2px 5px rgba(0,0,0,.35));}
+/* The face-down state is intentionally identical across cards. Numbering
+   was distracting noise — the user picks by mood, not by ordinal. The
+   element stays in the DOM so the planted "card-answer" can replace its
+   sibling cleanly without layout shift. */
+.card-num{display:none;}
+
+/* "Active" — the source card while the overlay is open. Subtle honk
+   accent on the still-face-down card so the user knows which one
+   they're working on. The grid is otherwise untouched. */
+.harvest-stage .card.active{
+  border-color:rgba(244,162,59,.30);
+  background:rgba(244,162,59,.04);
+}
+
+/* The centered overlay that floats on top of the grid. The grid does
+   NOT reflow — the card the user picked stays in its slot below, lit
+   by .active above. Tapping the scrim, the × button, or pressing
+   Escape closes. */
+.card-overlay{
+  position:fixed;inset:0;z-index:100;
+  display:flex;align-items:center;justify-content:center;
+  padding:24px;
+}
+.card-overlay[hidden]{display:none;}
+.overlay-scrim{
+  position:absolute;inset:0;
+  background:rgba(14,26,32,.78);
+}
+.overlay-card{
+  position:relative;z-index:1;
+  background:var(--surface);border:1px solid var(--line);border-radius:16px;
+  padding:22px 22px 18px;
+  width:100%;max-width:460px;max-height:84vh;overflow:auto;
+  animation:overlayIn 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes overlayIn{
+  from{opacity:0;transform:scale(.96) translateY(10px);}
+  to{opacity:1;transform:none;}
+}
+.card-close{
+  position:absolute;top:10px;right:12px;
+  background:transparent;border:none;color:var(--muted);
+  font-family:var(--display);font-size:24px;line-height:1;cursor:pointer;
+  width:30px;height:30px;border-radius:50%;
+}
+.card-close:hover{color:var(--ink);background:rgba(255,255,255,.06);}
+.card-prompt{
+  font-family:var(--display);font-weight:700;font-size:21px;line-height:1.25;
+  letter-spacing:-.02em;color:var(--ink);margin:4px 0 14px;
+  padding-right:36px;
+}
+.overlay-card textarea{
+  background:var(--pond-deep);border:1.5px solid var(--line);border-radius:11px;
+  color:var(--ink);font-family:var(--body);font-size:16px;padding:11px;
+  width:100%;min-height:84px;resize:vertical;margin-bottom:10px;
+}
+.overlay-card textarea:focus{outline:none;border-color:var(--honk);}
+.card-actions{display:flex;gap:10px;align-items:center;}
+.card-actions .btn{flex:1;}
+.overlay-card .hint{display:block;margin-top:8px;font-family:var(--mono);font-size:11px;}
+.overlay-card .hint.warn{color:var(--miss);}
+
+@media (prefers-reduced-motion: reduce){
+  .overlay-card{animation:none;}
+}
+
+/* Planted: the persistent post-submit state. The card stays in its grid
+   position (no reflow), keeps its size, and displays the user's own
+   answer as the editorial content of the card. The brand's display
+   family (Bricolage) and tightened letter-spacing match how prompts +
+   headlines are set elsewhere — the user's words get the same
+   typographic respect, not body-input echo.
+
+   Reed-tinted border marks the card done; the existence of writing
+   where the feather used to be is itself the "filled in" signal. */
+.harvest-stage .card.planted{
+  background:rgba(111,179,106,.05);
+  border-color:rgba(111,179,106,.30);
+  cursor:default;
+}
+.harvest-stage .card.planted:hover{background:rgba(111,179,106,.05);}
+.harvest-stage .card.planted .card-face{
+  /* Anchor the writing top-left like real text in a column, not centered
+     like the face-down feather. Generous padding so short answers still
+     have room to breathe. */
+  justify-content:flex-start;align-items:stretch;
+  padding:14px;cursor:default;
+}
+.card-answer{
+  font-family:var(--display);font-weight:500;font-size:14px;line-height:1.3;
+  letter-spacing:-.01em;color:var(--ink);text-align:left;
+  /* Truncate long answers with an ellipsis at the line clamp so the card
+     keeps the deck's grid uniformity (aspect-ratio:3/4). Four lines is
+     the sweet spot at 14px/500 inside a ~110px-wide cell — short
+     answers fit whole; long ones get a clear "more here" cue. */
+  display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;
+  overflow:hidden;word-break:break-word;
+  -webkit-hyphens:auto;hyphens:auto;
+}
+
+@media (prefers-reduced-motion: reduce){
+  .harvest-stage .card{transition:none;}
+}
+
 /* ---- result-page sign-in nudge ---- */
 .signin-cta{
   background:rgba(244,162,59,.08);border:1px solid rgba(244,162,59,.20);
@@ -244,7 +405,8 @@ footer small{color:var(--muted);font-family:var(--mono);font-size:11px;}
 .inline-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
 .inline-form input[type=text],.inline-form input[type=email]{
   background:var(--pond-deep);border:1.5px solid var(--line);border-radius:10px;
-  color:var(--ink);font-family:var(--body);font-size:14px;padding:8px 11px;
+  /* 16px to dodge iOS Safari's auto-zoom on focus (see textarea above). */
+  color:var(--ink);font-family:var(--body);font-size:16px;padding:8px 11px;
   flex:1;min-width:160px;
 }
 .inline-form input:focus{outline:none;border-color:var(--honk);}
