@@ -14,19 +14,34 @@ COMPOSE := docker compose -f deploy/docker-compose.yml --env-file deploy/compose
 
 # ---- docker-compose lifecycle ----------------------------------------------
 
-.PHONY: up down rebuild logs ps
+.PHONY: up up-prod down rebuild logs logs-prod ps
 
+# Local-testing stack: bbg + postgres only. Traffic comes in via the
+# Cloudflare Tunnel daemon pointed straight at 127.0.0.1:8080 (Caddy
+# would just be a dead branch trying to provision certs).
 up:
 	$(COMPOSE) up -d
 
-down:
-	$(COMPOSE) down
+# Production stack (DigitalOcean droplet): adds Caddy as the TLS edge.
+# `--profile edge` opts the caddy service into the lifecycle.
+up-prod:
+	$(COMPOSE) --profile edge up -d
 
+# `--profile edge` makes sure any running caddy container is stopped too.
+# Without the flag, profile-gated services would be left up.
+down:
+	$(COMPOSE) --profile edge down
+
+# Rebuilds the bbg image and recreates only its container; works under
+# either `up` mode because the bbg service is profile-less.
 rebuild:
 	$(COMPOSE) build --no-cache bbg
 	$(COMPOSE) up -d --force-recreate bbg
 
 logs:
+	$(COMPOSE) logs -f --tail=200 bbg
+
+logs-prod:
 	$(COMPOSE) logs -f --tail=200 bbg caddy
 
 ps:

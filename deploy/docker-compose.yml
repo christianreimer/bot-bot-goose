@@ -58,6 +58,12 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    # Edge-only: production uses Caddy to terminate TLS + serve compression
+    # and security headers. Local-testing paths (Cloudflare Tunnel daemon
+    # straight to bbg:8080, curl smoke tests, `make dev`) don't need it,
+    # so it's gated behind the `edge` profile and started by `make up-prod`
+    # but skipped by plain `make up`.
+    profiles: [edge]
     depends_on:
       - bbg
     ports:
