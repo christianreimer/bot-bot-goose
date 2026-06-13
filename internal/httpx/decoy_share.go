@@ -62,6 +62,7 @@ func (s *Server) handleDecoyShare(w http.ResponseWriter, r *http.Request) {
 	baseURL := s.requestBaseURL(r)
 	shortID := share.DecoyShortID(pd.ID)
 	pageURL := baseURL + "/d/" + shortID
+	ogImageURL := baseURL + "/d/" + shortID + "/og.png"
 
 	// Pre-build the share card so the page's "Share this" button hands the
 	// exact same text as /me's "Share report ▸".
@@ -101,7 +102,24 @@ func (s *Server) handleDecoyShare(w http.ResponseWriter, r *http.Request) {
 		"OfTotal":      ofTotal,
 		"ShareCard":    card,
 		"ShareURL":     pageURL,
+		"OGImageURL":   ogImageURL,
 		"BaseURL":      baseURL,
 	})
+}
+
+// handleDecoyShareOG renders the 1200x630 PNG behind the decoy share
+// page's <meta og:image>. Generic content (no per-decoy text in the
+// PNG) so the image can be cached aggressively.
+func (s *Server) handleDecoyShareOG(w http.ResponseWriter, r *http.Request) {
+	png, err := share.RenderDecoyShareOG()
+	if err != nil {
+		s.cfg.Logger.Error("render decoy og", "err", err)
+		http.Error(w, "render", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=86400, immutable")
+	w.Header().Set("X-Robots-Tag", "noindex")
+	_, _ = w.Write(png)
 }
 

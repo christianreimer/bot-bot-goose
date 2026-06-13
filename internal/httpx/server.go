@@ -158,6 +158,7 @@ func (s *Server) routes() {
 		// who land here from a share link don't need a separate auth path
 		// before playing today.
 		r.Get("/d/{short}", s.handleDecoyShare)
+		r.Get("/d/{short}/og.png", s.handleDecoyShareOG)
 
 		// Public per-play result share. The /og.png variant renders the
 		// 1200x630 social card via internal/share.RenderResultOG so chat

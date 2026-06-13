@@ -58,8 +58,10 @@ func Card(puzzleNumber int32, outcomes []game.Outcome, mode game.Mode, streak in
 		title = "Daily Human"
 		statLabel = "Human-Dar"
 	}
+	// Full URL (with scheme) so iMessage/WhatsApp/etc. auto-detect it and
+	// can render a rich preview from the og:image at /r/<short>/og.png.
 	return fmt.Sprintf("%s %s #%03d\n%s\n%s %d%%  ·  🔥%d\n%s",
-		icon, title, puzzleNumber, Grid(outcomes), statLabel, pct, streak, trimScheme(baseURL))
+		icon, title, puzzleNumber, Grid(outcomes), statLabel, pct, streak, withScheme(baseURL))
 }
 
 // DecoyReport is the per-decoy share artifact from design doc §4 — the
@@ -83,25 +85,30 @@ type DecoyReport struct {
 // DecoyReportCard renders the share artifact text. Variant is picked off the
 // report's state so the caller doesn't have to branch.
 func DecoyReportCard(rep DecoyReport, baseURL string) string {
-	host := trimScheme(baseURL)
+	// Use the full URL (scheme included) on its own line. iMessage,
+	// WhatsApp, Slack, and most other clients only generate a rich
+	// preview card when the URL is autodetectable, which requires the
+	// `https://` prefix. Earlier versions trimmed the scheme for visual
+	// neatness; that broke iMessage unfurls.
+	url := withScheme(baseURL)
 	if rep.ShareURL != "" {
-		host = trimScheme(rep.ShareURL)
+		url = withScheme(rep.ShareURL)
 	}
 	switch {
 	case rep.Status == "pending":
 		// Anticipation copy from §4 payoff loop beat 1.
 		return fmt.Sprintf("🪿 Bot Bot Goose · Decoy Report\n%q\n\n🪶 Planted. Goes live after review. We'll tell you how many you fool.\n%s",
-			rep.Text, host)
+			rep.Text, url)
 	case rep.Status == "rejected", rep.Status == "retired":
 		return fmt.Sprintf("🪿 Bot Bot Goose · Decoy Report\n%q\n\nretired\n%s",
-			rep.Text, host)
+			rep.Text, url)
 	case rep.Impressions == 0:
 		return fmt.Sprintf("🪿 Bot Bot Goose · Decoy Report\n%q\n\n🪶 Live. Waiting for its first impressions.\n%s",
-			rep.Text, host)
+			rep.Text, url)
 	case rep.RawPct < 15:
 		// §4 flop copy: warm reframe, not punishing.
 		return fmt.Sprintf("🪿 Bot Bot Goose · Decoy Report\n%q\n\n🧑 Too human. Only %d%% thought I was a bot.\nOut of %d impressions, you're unmistakably one of us.\n%s",
-			rep.Text, rep.RawPct, rep.Impressions, host)
+			rep.Text, rep.RawPct, rep.Impressions, url)
 	default:
 		// §4 payoff card.
 		main := fmt.Sprintf("🪿 Bot Bot Goose · Decoy Report\n%q\n\n🤖 %d%% of humans think I'm a bot · %d fooled",
@@ -114,12 +121,18 @@ func DecoyReportCard(rep DecoyReport, baseURL string) string {
 		} else if rep.Tier != "" {
 			main += fmt.Sprintf("\n%s · still building rep", rep.Tier)
 		}
-		return main + "\n" + host
+		return main + "\n" + url
 	}
 }
 
-func trimScheme(u string) string {
-	u = strings.TrimPrefix(u, "https://")
-	u = strings.TrimPrefix(u, "http://")
-	return strings.TrimSuffix(u, "/")
+// withScheme ensures the URL carries an explicit `https://` (or whatever
+// scheme it came with) so messaging-app URL autodetection works. If the
+// caller handed us a bare host like "botbotgoose.fun/d/abc", we prepend
+// https:// since that's the only scheme we serve.
+func withScheme(u string) string {
+	u = strings.TrimSuffix(u, "/")
+	if strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
+		return u
+	}
+	return "https://" + u
 }

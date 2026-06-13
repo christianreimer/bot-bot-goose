@@ -132,6 +132,52 @@ func RenderResultOG(r ResultOG) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// RenderDecoyShareOG produces the unfurl card for the /d/<short> page.
+// Generic across decoys (no per-decoy text rendered into the image) so
+// callers can cache it indefinitely. The page-level og:title carries the
+// per-decoy "X% thought this was a bot" stat; this image is the brand
+// poster underneath. Same editorial composition as the harvest card.
+func RenderDecoyShareOG() ([]byte, error) {
+	img := image.NewRGBA(image.Rect(0, 0, OGWidth, OGHeight))
+	fill(img, img.Bounds(), colorPondDeep)
+	fill(img, image.Rect(0, 0, OGWidth, 240), color.RGBA{0x1c, 0x33, 0x40, 0xff})
+
+	fillCircle(img, 180, OGHeight/2, 96, colorHonk)
+
+	face64, err := loadFace(64)
+	if err != nil {
+		return nil, err
+	}
+	defer face64.Close()
+	face28, err := loadFace(32)
+	if err != nil {
+		return nil, err
+	}
+	defer face28.Close()
+	face18, err := loadFace(22)
+	if err != nil {
+		return nil, err
+	}
+	defer face18.Close()
+	face14, err := loadFace(18)
+	if err != nil {
+		return nil, err
+	}
+	defer face14.Close()
+
+	drawString(img, face14, "BOT BOT GOOSE · DECOY REPORT", 320, 178, colorHonk)
+	drawString(img, face64, "Could you have caught this?", 320, 274, colorInk)
+	drawString(img, face28, "A human-written answer that fooled real players.", 320, 348, colorMuted)
+	drawString(img, face28, "Tap to read it. Then come play.", 320, 392, colorMuted)
+	drawString(img, face18, "botbotgoose.fun", 320, OGHeight-58, colorHonk)
+
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 // RenderHarvestOG produces the static unfurl card for the /harvest landing
 // page. No per-request data — the content is the campaign pitch only, so
 // callers can cache the output indefinitely. Editorial composition: small
