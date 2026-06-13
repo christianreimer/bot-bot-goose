@@ -629,9 +629,14 @@ a.puzzle-no:hover{color:var(--ink);}
 /* ---- /privacy ---- */
 .privacy{display:block;}
 .privacy-header{margin:22px 0 28px;}
+/* Pull the "Updated 2026-XX-XX" line tight under the H1 so it reads as
+   the subtitle of the heading, not as a separate paragraph. The default
+   .prompt-headline carries margin-bottom:14px which here would feel
+   like a paragraph break. */
+.privacy-header .prompt-headline{margin-bottom:2px;}
 .privacy-updated{
   font-family:var(--mono);font-size:12px;color:var(--muted);
-  margin-top:4px;
+  margin-top:0;
 }
 .privacy-section{margin:0 0 26px;}
 .privacy-section h3{
