@@ -42,8 +42,12 @@ func Grid(outcomes []game.Outcome) string {
 	return sb.String()
 }
 
-// Card is the full multi-line share string.
-func Card(puzzleNumber int32, outcomes []game.Outcome, streak int, baseURL string) string {
+// Card is the full multi-line share string. humansYesterdayPct, when >= 0,
+// inserts a collective rally line ("Humans yesterday: X%") between the
+// scoreLine and the URL — see internal/collective for the source of the
+// number. Pass -1 to omit the line entirely (no qualifying prior puzzle, or
+// the caller doesn't need it).
+func Card(puzzleNumber int32, outcomes []game.Outcome, streak int, humansYesterdayPct int, baseURL string) string {
 	pct := game.ScorePct(outcomes)
 	// 0/3 sweep is not a success. Prefix the score line so the share text
 	// states the outcome honestly rather than reading like a bare stat.
@@ -53,8 +57,13 @@ func Card(puzzleNumber int32, outcomes []game.Outcome, streak int, baseURL strin
 	}
 	// Full URL (with scheme) so iMessage/WhatsApp/etc. auto-detect it and
 	// can render a rich preview from the og:image at /r/<short>/og.png.
+	url := withScheme(baseURL)
+	if humansYesterdayPct >= 0 {
+		return fmt.Sprintf("%s Daily Goose #%03d\n%s\n%s\nHumans yesterday: %d%%\n%s",
+			IconFindBot, puzzleNumber, Grid(outcomes), scoreLine, humansYesterdayPct, url)
+	}
 	return fmt.Sprintf("%s Daily Goose #%03d\n%s\n%s\n%s",
-		IconFindBot, puzzleNumber, Grid(outcomes), scoreLine, withScheme(baseURL))
+		IconFindBot, puzzleNumber, Grid(outcomes), scoreLine, url)
 }
 
 // DecoyReport is the per-decoy share artifact — the second viral surface

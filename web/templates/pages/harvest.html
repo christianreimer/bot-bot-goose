@@ -1,9 +1,9 @@
 {{ template "base.html" . }}
 
-{{ define "title" }}Help build the goose{{ end }}
+{{ define "title" }}Stack the deck for the humans{{ end }}
 
 {{ define "og" }}
-  <meta property="og:title" content="Help build Bot Bot Goose" />
+  <meta property="og:title" content="Help the humans get ready" />
   <meta property="og:description" content="Type like a person. Your answers go into future rounds." />
   <meta property="og:url" content="{{ .ShareURL }}" />
   <meta property="og:image" content="{{ .OGImageURL }}" />
@@ -24,13 +24,13 @@
     {{ if .DeckSize }}
       <section class="harvest-lede">
         <span class="kicker">Before we launch</span>
-        <h1 class="prompt-headline">Help build the goose.</h1>
+        <h1 class="prompt-headline">Stack the deck for the humans.</h1>
         <p class="harvest-sub">
           Each card is a question. Type like a person.
           The most human lines go into future rounds.
         </p>
         <p class="harvest-counter">
-          <span id="counter">0</span> of <span id="total">{{ .DeckSize }}</span> planted
+          <span id="counter">0</span> of <span id="total">{{ .DeckSize }}</span> added
         </p>
       </section>
 
@@ -59,7 +59,7 @@
             <textarea id="overlayInput" maxlength="280" minlength="4" required spellcheck="true"
               placeholder="type like a person, not a press release…"></textarea>
             <div class="card-actions">
-              <button type="submit" class="btn btn-primary" id="overlayPlant">Plant ▸</button>
+              <button type="submit" class="btn btn-primary" id="overlayPlant">Add my line ▸</button>
             </div>
             <small class="hint muted" id="overlayHint">4–280 characters · one answer per question per device</small>
           </form>
@@ -68,13 +68,13 @@
 
       <section class="harvest-done" id="harvestDone" hidden>
         <span class="kicker">Done</span>
-        <h2 class="prompt-headline">Planted all <span id="plantedCount">0</span>.</h2>
+        <h2 class="prompt-headline">Added all <span id="plantedCount">0</span>.</h2>
         <p class="harvest-sub">Thanks. Your cards stay visible above. The reviewers take it from here.</p>
       </section>
     {{ else }}
       <section class="harvest-lede">
         <span class="kicker">Before we launch</span>
-        <h1 class="prompt-headline">You've planted everything we've got.</h1>
+        <h1 class="prompt-headline">You've added everything we've got.</h1>
         <p class="harvest-sub">
           Every prompt has hit its supply ceiling, or you've already answered
           them all from this device. Come back when fresh ones land.

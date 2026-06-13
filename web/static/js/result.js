@@ -66,8 +66,8 @@
         const meta = document.getElementById('decoyHint');
         if (meta) meta.textContent = 'Queued for review.';
         const shareUrl = body && body.share_url ? body.share_url : '/me';
-        submitBtn.replaceWith(plantedOk('✓ Planted. ', 'See your line ▸', shareUrl));
-        flash('Line planted 🪶');
+        submitBtn.replaceWith(plantedOk('✓ Added. ', 'See your line ▸', shareUrl));
+        flash('Line added 🪶');
         return;
       }
 
@@ -80,8 +80,8 @@
         ta.disabled = true;
         const meta = document.getElementById('decoyHint');
         if (meta) meta.textContent = 'One per prompt.';
-        submitBtn.replaceWith(plantedOk("🪶 You've already planted one here. ", 'See it ▸', link));
-        flash('Already planted here.');
+        submitBtn.replaceWith(plantedOk("🪶 You've already added one here. ", 'See it ▸', link));
+        flash('Already added here.');
         return;
       }
       if (code === 'rate_limited') {
@@ -141,6 +141,6 @@
     if (caught === 3) return `Caught every goose. A hint or two slipped in.`;
     if (caught === 2) return `Two of three. The bots are getting good.`;
     if (caught === 1) return `One catch. Honk back harder tomorrow.`;
-    return `Swept. It happens to everyone once.`;
+    return `Swept. The bots had a good day. We'll get them tomorrow.`;
   }
 })();

@@ -10,9 +10,10 @@ import (
 
 func TestRenderResultOGProducesValidPNG(t *testing.T) {
 	data, err := RenderResultOG(ResultOG{
-		PuzzleNumber: 7,
-		Outcomes:     []game.Outcome{game.Green, game.Yellow, game.Red},
-		Streak:       5,
+		PuzzleNumber:       7,
+		Outcomes:           []game.Outcome{game.Green, game.Yellow, game.Red},
+		Streak:             5,
+		HumansYesterdayPct: -1,
 	})
 	if err != nil {
 		t.Fatalf("render: %v", err)
@@ -36,8 +37,28 @@ func TestRenderResultOGHandlesAllOutcomes(t *testing.T) {
 		{game.Yellow, game.Yellow, game.Yellow},
 		{game.Green, game.Yellow, game.Red},
 	} {
-		if _, err := RenderResultOG(ResultOG{Outcomes: outs}); err != nil {
+		if _, err := RenderResultOG(ResultOG{Outcomes: outs, HumansYesterdayPct: -1}); err != nil {
 			t.Errorf("outs=%v: %v", outs, err)
+		}
+	}
+}
+
+// The collective rally line is an optional extra paint pass; it must not
+// break the renderer regardless of value. We can't inspect text inside the
+// PNG cheaply, so this just exercises the code path.
+func TestRenderResultOGWithCollectiveLine(t *testing.T) {
+	for _, pct := range []int{0, 1, 50, 99, 100} {
+		data, err := RenderResultOG(ResultOG{
+			PuzzleNumber:       12,
+			Outcomes:           []game.Outcome{game.Green, game.Green, game.Yellow},
+			Streak:             3,
+			HumansYesterdayPct: pct,
+		})
+		if err != nil {
+			t.Fatalf("pct=%d: %v", pct, err)
+		}
+		if _, err := png.Decode(bytes.NewReader(data)); err != nil {
+			t.Fatalf("pct=%d decode: %v", pct, err)
 		}
 	}
 }

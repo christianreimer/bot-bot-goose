@@ -221,18 +221,18 @@ Re-picks fresh answers for that round only; refuses if puzzle #12 has plays.
 ### Compose a puzzle with deliberately picked answers
 
 ```bash
-bbg-admin puzzle compose --date 2026-06-25 --mode find_the_bot \
+bbg-admin puzzle compose --date 2026-06-25 \
   --prompts <u1>,<u2>,<u3> \
   --round0-bots <b1> --round0-decoys <d1>,<d2>,<d3> \
   --round1-bots <b2> --round1-decoys <d4>,<d5>,<d6> \
   --round2-bots <b3> --round2-decoys <d7>,<d8>,<d9>
 ```
 
-Modes: `find_the_bot` needs 1 bot + 3 decoys per round; `find_the_human`
-inverts to 3 bots + 1 decoy. `--roundN-bots` and `--roundN-decoys` are
-all-or-nothing — set both or neither (omitting both falls back to random
-picks from the approved pool for that round). Bad picks (not approved,
-wrong prompt, duplicates, wrong count) fail with `code: "invalid"`.
+Every round is 1 bot + 3 decoys (the only mode). `--roundN-bots` and
+`--roundN-decoys` are all-or-nothing — set both or neither (omitting both
+falls back to random picks from the approved pool for that round). Bad
+picks (not approved, wrong prompt, duplicates, wrong count) fail with
+`code: "invalid"`.
 
 `set-round` accepts the same `--bot-ids` / `--decoy-ids` flags for a single
 round. `set-answer` accepts `--bot-id` / `--decoy-id` to swap a single slot's

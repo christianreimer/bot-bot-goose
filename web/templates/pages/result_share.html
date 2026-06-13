@@ -30,6 +30,9 @@
           <div class="stat"><div class="n honk">{{ .ScorePct }}%</div><div class="l">{{ .StatLabel }}</div></div>
           <div class="stat"><div class="n">🔥 {{ .Streak }}</div><div class="l">streak</div></div>
         </div>
+        {{ if .HasHumansYesterday }}
+          <p class="muted collective">Yesterday, humans caught the goose {{ .HumansYesterdayPct }}%.</p>
+        {{ end }}
       </div>
 
       <div class="controls">

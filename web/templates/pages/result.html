@@ -20,6 +20,9 @@
           <div class="stat"><div class="n honk">{{ .ScorePct }}%</div><div class="l">Bot-Dar</div></div>
           <div class="stat"><div class="n">{{ .Streak }}</div><div class="l">streak</div></div>
         </div>
+        {{ if .HasHumansYesterday }}
+          <p class="muted collective">Yesterday, humans caught the goose {{ .HumansYesterdayPct }}%.</p>
+        {{ end }}
       </div>
 
       <div class="controls">
@@ -42,7 +45,7 @@
       {{ if .NextPromptID }}
         {{ if .ExistingDecoyShareURL }}
         <div class="decoy">
-          <h3>You've planted one here already 🪶</h3>
+          <h3>You've added one here already 🪶</h3>
           <p><span class="nextprompt">&ldquo;{{ .NextPromptText }}&rdquo;</span><br>
             One line per prompt per player. Yours is
             {{ if eq .ExistingDecoyStatus "pending" }}<b>in review</b>{{ end }}
@@ -59,13 +62,13 @@
           <h3>Stand with the humans</h3>
           <p class="decoy-target"><span class="nextprompt">&ldquo;{{ .NextPromptText }}&rdquo;</span></p>
           <p class="decoy-body">
-            Every round, three humans face a bot.<br>
-            Your answer joins a future lineup. If real players pick yours as the most human after the reveal, you climb the forger leaderboard.
+            Every round, three humans face a bot. Every real line you add makes it harder for the next bot to hide.<br>
+            Drop yours into a future round. If the room picks it as the most human, you climb the forger board.
           </p>
           <form id="decoyForm" data-prompt-id="{{ .NextPromptID }}">
             <textarea id="decoyText" maxlength="220" minlength="4" required
                       placeholder="one honest line. no need to perform."></textarea>
-            <button type="submit" class="btn btn-primary" id="decoySubmit">Plant ▸</button>
+            <button type="submit" class="btn btn-primary" id="decoySubmit">Add my line ▸</button>
             <small class="decoy-hint" id="decoyHint">One per prompt. Reviewed before it goes live.</small>
           </form>
         </div>

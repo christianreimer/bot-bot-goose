@@ -3,6 +3,7 @@ package httpx
 import (
 	"net/http"
 
+	"github.com/christianreimer/bot-bot-goose/internal/collective"
 	"github.com/christianreimer/bot-bot-goose/internal/share"
 	"github.com/go-chi/chi/v5"
 )
@@ -42,17 +43,29 @@ func (s *Server) handleResultShare(w http.ResponseWriter, r *http.Request) {
 	// stays minimal — see result.js).
 	cardLine := share.Grid(pp.Outcomes)
 
+	// Yesterday's collective catch rate. Same source as the play result page.
+	hasCollective := false
+	humansYesterdayPct := -1
+	if stat, ok, err := s.cfg.DB.LatestCollectiveStat(r.Context(), collective.MinPlaysFloor); err == nil && ok {
+		humansYesterdayPct = stat.CatchPct
+		hasCollective = true
+	} else if err != nil {
+		s.cfg.Logger.Warn("collective stat read", "err", err)
+	}
+
 	s.renderHTML(w, http.StatusOK, "pages/result_share.html", map[string]any{
-		"PuzzleNumber": pp.PuzzleNumber,
-		"Grid":         cardLine,
-		"ScorePct":     pp.ScorePct,
-		"StatLabel":    "Bot-Dar",
-		"Streak":       pp.Streak,
-		"Author":       pp.AuthorHandle,
-		"TitleVerb":    titleVerb,
-		"ShareURL":     pageURL,
-		"OGImageURL":   imgURL,
-		"BaseURL":      baseURL,
+		"PuzzleNumber":       pp.PuzzleNumber,
+		"Grid":               cardLine,
+		"ScorePct":           pp.ScorePct,
+		"StatLabel":          "Bot-Dar",
+		"Streak":             pp.Streak,
+		"Author":             pp.AuthorHandle,
+		"TitleVerb":          titleVerb,
+		"ShareURL":           pageURL,
+		"OGImageURL":         imgURL,
+		"BaseURL":            baseURL,
+		"HasHumansYesterday": hasCollective,
+		"HumansYesterdayPct": humansYesterdayPct,
 	})
 }
 
@@ -72,10 +85,20 @@ func (s *Server) handleResultShareOG(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Same collective number we paint on the page body — keeps text and
+	// image in lockstep. -1 omits the OG line entirely.
+	humansYesterdayPct := -1
+	if stat, ok, err := s.cfg.DB.LatestCollectiveStat(r.Context(), collective.MinPlaysFloor); err == nil && ok {
+		humansYesterdayPct = stat.CatchPct
+	} else if err != nil {
+		s.cfg.Logger.Warn("collective stat read (og)", "err", err)
+	}
+
 	png, err := share.RenderResultOG(share.ResultOG{
-		PuzzleNumber: pp.PuzzleNumber,
-		Outcomes:     pp.Outcomes,
-		Streak:       pp.Streak,
+		PuzzleNumber:       pp.PuzzleNumber,
+		Outcomes:           pp.Outcomes,
+		Streak:             pp.Streak,
+		HumansYesterdayPct: humansYesterdayPct,
 	})
 	if err != nil {
 		s.cfg.Logger.Error("render og", "err", err)

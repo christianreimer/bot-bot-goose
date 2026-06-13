@@ -78,7 +78,7 @@
     const showHuntPulse = r.index === 0 && stage.dataset.signedIn !== '1';
     const huntClass = showHuntPulse ? 'hunt hunt-attention' : 'hunt';
     stage.innerHTML = `
-      <div class="round-label">Round ${r.index + 1} of ${N_ROUNDS} <span class="${huntClass}">· Find the bot</span></div>
+      <div class="round-label">Round ${r.index + 1} of ${N_ROUNDS} <span class="${huntClass}">· Catch the bot</span></div>
       <div class="prompt"></div>
       <div class="answers" id="answers"></div>
       <div class="controls" id="controls"></div>`;

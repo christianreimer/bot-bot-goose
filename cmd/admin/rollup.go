@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/christianreimer/bot-bot-goose/internal/collective"
 	"github.com/christianreimer/bot-bot-goose/internal/db"
 	"github.com/christianreimer/bot-bot-goose/internal/leaderboard"
 )
@@ -28,5 +29,13 @@ func runRollup(ctx context.Context, log *slog.Logger) error {
 		return err
 	}
 	log.Info("forger rollup complete", "authors_updated", n)
+
+	// Freeze yesterday's collective catch rate so the result page + share
+	// card surface a stable, identical-for-everyone number all day.
+	wrote, err := collective.Rollup(ctx, d)
+	if err != nil {
+		return err
+	}
+	log.Info("collective rollup complete", "stat_written", wrote)
 	return nil
 }

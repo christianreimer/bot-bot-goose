@@ -657,9 +657,8 @@ type PromptSupplyRollup struct {
 }
 
 // PromptSupplyCounts returns one rollup per non-retired prompt. Used to spot
-// which prompts are ready for a given mode (find_the_bot needs ≥4 decoys;
-// find_the_human needs ≥3 bots + ≥1 decoy) and which are already burned by
-// the upcoming schedule.
+// which prompts are ready (need ≥1 approved bot + ≥3 approved decoys) and
+// which are already burned by the upcoming schedule.
 func (d *DB) PromptSupplyCounts(ctx context.Context) ([]PromptSupplyRollup, error) {
 	const q = `
 		SELECT

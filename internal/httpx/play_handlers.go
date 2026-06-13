@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/christianreimer/bot-bot-goose/internal/collective"
 	"github.com/christianreimer/bot-bot-goose/internal/db"
 	"github.com/christianreimer/bot-bot-goose/internal/game"
 	"github.com/christianreimer/bot-bot-goose/internal/play"
@@ -110,7 +111,17 @@ func (s *Server) renderPlayPage(w http.ResponseWriter, r *http.Request, puzzle *
 				shareURL = baseURL + "/r/" + share.PlayShortID(p.ID)
 			}
 		}
-		card := share.Card(puzzle.PuzzleNumber, outcomes, state.Streak, baseURL)
+		// Yesterday's collective catch rate. Absent on day 1 / sub-floor
+		// puzzles — pass -1 to omit the line entirely rather than render 0%.
+		humansYesterdayPct := -1
+		hasCollective := false
+		if stat, ok, err := s.cfg.DB.LatestCollectiveStat(r.Context(), collective.MinPlaysFloor); err == nil && ok {
+			humansYesterdayPct = stat.CatchPct
+			hasCollective = true
+		} else if err != nil {
+			s.cfg.Logger.Warn("collective stat read", "err", err)
+		}
+		card := share.Card(puzzle.PuzzleNumber, outcomes, state.Streak, humansYesterdayPct, baseURL)
 
 		// Decoy solicitation: pick a prompt to ask the player to write for.
 		// Soft-fail if none is available — the page still renders without
@@ -154,6 +165,8 @@ func (s *Server) renderPlayPage(w http.ResponseWriter, r *http.Request, puzzle *
 			"ExistingDecoyShareURL": existingDecoyShareURL,
 			"ExistingDecoyStatus":   existingDecoyStatus,
 			"SignedIn":              signedIn,
+			"HasHumansYesterday":    hasCollective,
+			"HumansYesterdayPct":    humansYesterdayPct,
 		})
 		return
 	}

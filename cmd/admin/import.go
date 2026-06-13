@@ -20,9 +20,7 @@ import (
 //     read top-to-bottom without cross-referencing.
 //   - "approved" status is implicit for everything in the file. Pending content
 //     belongs in the moderation queue, not in version-controlled imports.
-//   - puzzles MUST match their mode's recipe:
-//       find_the_bot:   1 bot + 3 decoys
-//       find_the_human: 3 bots + 1 decoy
+//   - every puzzle round is 1 bot + 3 decoys (the only mode).
 type importDoc struct {
 	Puzzles []importPuzzle  `json:"puzzles"`
 	Prompts []importPrompt  `json:"prompts"` // bare prompts (no decoys/bots) — used for the harvest campaign seed

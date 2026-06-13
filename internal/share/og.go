@@ -39,10 +39,15 @@ var (
 // ResultOG holds the data the OG image renders. It deliberately excludes
 // anything that could spoil today's puzzle — no prompts, no answers, no
 // archetype. Just the grid + brand + score.
+//
+// HumansYesterdayPct, when >= 0, paints a muted "Humans yesterday: X%" line
+// between the card and the footer. Pass -1 to omit the line entirely
+// (no qualifying prior puzzle, or the caller doesn't need it).
 type ResultOG struct {
-	PuzzleNumber int32
-	Outcomes     []game.Outcome
-	Streak       int
+	PuzzleNumber       int32
+	Outcomes           []game.Outcome
+	Streak             int
+	HumansYesterdayPct int
 }
 
 // RenderResultOG returns a 1200x630 PNG suitable for og:image.
@@ -120,6 +125,14 @@ func RenderResultOG(r ResultOG) ([]byte, error) {
 	if r.Streak > 0 {
 		streakLine := fmt.Sprintf("streak %d", r.Streak)
 		drawStringRight(img, face18, streakLine, cardX+cardW-36, cardY+cardH-50, colorMuted)
+	}
+
+	// Collective rally line between the card and the footer. Same source
+	// of truth as the share-card text (internal/collective). Muted ink so
+	// the score keeps the visual lead.
+	if r.HumansYesterdayPct >= 0 {
+		collective := fmt.Sprintf("Humans yesterday: %d%%", r.HumansYesterdayPct)
+		drawStringCentered(img, face18, collective, OGWidth/2, cardY+cardH+50, colorMuted)
 	}
 
 	// Footer.
