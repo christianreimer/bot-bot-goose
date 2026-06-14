@@ -23,8 +23,8 @@ func runStats(ctx context.Context, log *slog.Logger) error {
 		return statsPlayers(ctx, log)
 	case "decoys":
 		return statsDecoys(ctx, log)
-	case "harvest":
-		return statsHarvest(ctx, log)
+	case "prelaunch":
+		return statsPrelaunch(ctx, log)
 	default:
 		statsUsage()
 		os.Exit(2)
@@ -34,10 +34,10 @@ func runStats(ctx context.Context, log *slog.Logger) error {
 
 func statsUsage() {
 	fmt.Fprintln(os.Stderr, `usage: bbg-admin stats <verb> [flags]
-  overview  Snapshot: players, plays, decoys, harvest, pool inventory.
+  overview  Snapshot: players, plays, decoys, prelaunch, pool inventory.
   players   Daily time series: active devices + plays started/completed.
   decoys    Daily time series: decoy submissions by status (+ --top fool-rate).
-  harvest   Daily time series: harvest submissions / ingested / rejected.`)
+  prelaunch   Daily time series: prelaunch submissions / ingested / rejected.`)
 }
 
 // registerStatsWindow adds --since and --days. --since overrides --days. If
@@ -103,12 +103,12 @@ func statsOverview(ctx context.Context, log *slog.Logger) error {
 			{"rejected", s.DecoysRejected},
 		}
 		_ = emitTable([]string{"METRIC", "VALUE"}, rows)
-		fmt.Fprintln(os.Stdout, "\nHARVEST (window)")
+		fmt.Fprintln(os.Stdout, "\nPRELAUNCH (window)")
 		rows = [][]any{
-			{"submitted", s.HarvestSubmitted},
-			{"ingested", s.HarvestIngested},
-			{"rejected", s.HarvestRejected},
-			{"unique_devices", s.HarvestUniqueDevices},
+			{"submitted", s.PrelaunchSubmitted},
+			{"ingested", s.PrelaunchIngested},
+			{"rejected", s.PrelaunchRejected},
+			{"unique_devices", s.PrelaunchUniqueDevices},
 		}
 		_ = emitTable([]string{"METRIC", "VALUE"}, rows)
 		fmt.Fprintln(os.Stdout, "\nPOOL INVENTORY (current, all-time)")
@@ -117,7 +117,7 @@ func statsOverview(ctx context.Context, log *slog.Logger) error {
 			{"approved_bots", s.ApprovedBotPool},
 			{"pending_decoys", s.PendingDecoyPool},
 			{"pending_bots", s.PendingBotPool},
-			{"pending_harvest", s.PendingHarvest},
+			{"pending_prelaunch", s.PendingPrelaunch},
 		}
 		return emitTable([]string{"METRIC", "VALUE"}, rows)
 	}
@@ -136,18 +136,18 @@ func statsOverview(ctx context.Context, log *slog.Logger) error {
 			"pending":   s.DecoysPending,
 			"rejected":  s.DecoysRejected,
 		},
-		"harvest": map[string]any{
-			"submitted":      s.HarvestSubmitted,
-			"ingested":       s.HarvestIngested,
-			"rejected":       s.HarvestRejected,
-			"unique_devices": s.HarvestUniqueDevices,
+		"prelaunch": map[string]any{
+			"submitted":      s.PrelaunchSubmitted,
+			"ingested":       s.PrelaunchIngested,
+			"rejected":       s.PrelaunchRejected,
+			"unique_devices": s.PrelaunchUniqueDevices,
 		},
 		"pool_inventory": map[string]any{
 			"approved_decoys": s.ApprovedDecoyPool,
 			"approved_bots":   s.ApprovedBotPool,
 			"pending_decoys":  s.PendingDecoyPool,
 			"pending_bots":    s.PendingBotPool,
-			"pending_harvest": s.PendingHarvest,
+			"pending_prelaunch": s.PendingPrelaunch,
 		},
 	})
 }
@@ -276,10 +276,10 @@ func statsDecoys(ctx context.Context, log *slog.Logger) error {
 	return emitJSON(out)
 }
 
-// --- harvest -----------------------------------------------------------------
+// --- prelaunch -----------------------------------------------------------------
 
-func statsHarvest(ctx context.Context, log *slog.Logger) error {
-	fs := flag.NewFlagSet("stats harvest", flag.ExitOnError)
+func statsPrelaunch(ctx context.Context, log *slog.Logger) error {
+	fs := flag.NewFlagSet("stats prelaunch", flag.ExitOnError)
 	dbf := registerDBFlags(fs)
 	sinceStr, days := registerStatsWindow(fs)
 	asTable := fs.Bool("table", false, "human-readable table instead of JSON")
@@ -295,7 +295,7 @@ func statsHarvest(ctx context.Context, log *slog.Logger) error {
 		return err
 	}
 	defer d.Close()
-	rows, err := d.HarvestByDay(ctx, since)
+	rows, err := d.PrelaunchByDay(ctx, since)
 	if err != nil {
 		return emitError("db", err.Error(), nil)
 	}

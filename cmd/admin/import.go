@@ -23,7 +23,7 @@ import (
 //   - every puzzle round is 1 bot + 3 decoys (the only mode).
 type importDoc struct {
 	Puzzles []importPuzzle  `json:"puzzles"`
-	Prompts []importPrompt  `json:"prompts"` // bare prompts (no decoys/bots) — used for the harvest campaign seed
+	Prompts []importPrompt  `json:"prompts"` // bare prompts (no decoys/bots) — used for the prelaunch campaign seed
 }
 
 // importPrompt is a bare prompt entry. No status; prompts have no moderation

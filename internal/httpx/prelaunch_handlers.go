@@ -17,71 +17,71 @@ import (
 )
 
 const (
-	harvestPoolCacheNS  = "harvest"
-	harvestPoolCacheKey = "harvest:eligible:v1"
-	harvestPoolCacheTTL = 60 * time.Second
+	prelaunchPoolCacheNS  = "prelaunch"
+	prelaunchPoolCacheKey = "prelaunch:eligible:v1"
+	prelaunchPoolCacheTTL = 60 * time.Second
 )
 
-// Harvest is the Phase-0 collection campaign surface (design doc §3). The
+// Prelaunch is the Phase-0 collection campaign surface (design doc §3). The
 // deck is 21 under-supplied prompts at a time, laid out as a 3-column ×
 // 7-row grid. Submissions land in pre_launch_submissions — they DO NOT
 // flow into the live game or the composer's bandit. Manual promotion
-// (today: a SQL one-liner) is the only path from "harvested" to
+// (today: a SQL one-liner) is the only path from "prelaunched" to
 // "in-game decoy."
 const (
-	harvestDeckSize = 21
+	prelaunchDeckSize = 21
 
 	// Per-device + per-IP rate limits, looser than the regular decoy
 	// endpoint because a 21-card sitting is the intended use. 30/hour
 	// gives the user comfortable room to finish a deck in one go; the
 	// per-IP ceiling tolerates shared NAT.
-	harvestSubmitDeviceCapacity = 30
-	harvestSubmitDeviceRefill   = 30.0 // per hour
+	prelaunchSubmitDeviceCapacity = 30
+	prelaunchSubmitDeviceRefill   = 30.0 // per hour
 
-	harvestSubmitIPCapacity = 100
-	harvestSubmitIPRefill   = 100.0 // per hour
+	prelaunchSubmitIPCapacity = 100
+	prelaunchSubmitIPRefill   = 100.0 // per hour
 )
 
-// harvestCard is one entry rendered server-side into the deck grid.
-// The harvest UI is fully server-rendered; the JS reads prompt IDs off
+// prelaunchCard is one entry rendered server-side into the deck grid.
+// The prelaunch UI is fully server-rendered; the JS reads prompt IDs off
 // data-prompt-id attributes, not from an embedded JSON state.
-type harvestCard struct {
+type prelaunchCard struct {
 	ID   string
 	Text string
 }
 
-func (s *Server) handleHarvest(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handlePrelaunch(w http.ResponseWriter, r *http.Request) {
 	u := users.FromContext(r.Context())
-	prompts, err := s.harvestDeckFor(r.Context(), u.ID)
+	prompts, err := s.prelaunchDeckFor(r.Context(), u.ID)
 	if err != nil {
-		s.cfg.Logger.Error("harvest deck", "err", err)
+		s.cfg.Logger.Error("prelaunch deck", "err", err)
 		http.Error(w, "deck", http.StatusInternalServerError)
 		return
 	}
 
-	deck := make([]harvestCard, 0, len(prompts))
+	deck := make([]prelaunchCard, 0, len(prompts))
 	for _, p := range prompts {
-		deck = append(deck, harvestCard{ID: p.ID.String(), Text: p.Text})
+		deck = append(deck, prelaunchCard{ID: p.ID.String(), Text: p.Text})
 	}
 
 	baseURL := s.requestBaseURL(r)
-	s.renderHTML(w, http.StatusOK, "pages/harvest.html", map[string]any{
+	s.renderHTML(w, http.StatusOK, "pages/prelaunch.html", map[string]any{
 		"PuzzleNumber": int32(0), // satisfies the base-layout pad3 cosmetic
 		"DeckSize":     len(prompts),
 		"Deck":         deck, // server-rendered into the grid via {{ range .Deck }}
 		"BaseURL":      baseURL,
-		"ShareURL":     baseURL + "/harvest",
-		"OGImageURL":   baseURL + "/harvest/og.png",
+		"ShareURL":     baseURL + "/prelaunch",
+		"OGImageURL":   baseURL + "/prelaunch/og.png",
 	})
 }
 
-// handleHarvestOG serves the static landing PNG. Content is generic, so the
-// bytes are precomputed once and shared across requests — see HarvestOGBytes
+// handlePrelaunchOG serves the static landing PNG. Content is generic, so the
+// bytes are precomputed once and shared across requests — see PrelaunchOGBytes
 // in internal/share/og.go.
-func (s *Server) handleHarvestOG(w http.ResponseWriter, r *http.Request) {
-	png, err := share.HarvestOGBytes()
+func (s *Server) handlePrelaunchOG(w http.ResponseWriter, r *http.Request) {
+	png, err := share.PrelaunchOGBytes()
 	if err != nil {
-		s.cfg.Logger.Error("render harvest og", "err", err)
+		s.cfg.Logger.Error("render prelaunch og", "err", err)
 		http.Error(w, "render", http.StatusInternalServerError)
 		return
 	}
@@ -91,16 +91,16 @@ func (s *Server) handleHarvestOG(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(png)
 }
 
-type harvestSubmitReq struct {
+type prelaunchSubmitReq struct {
 	PromptID string `json:"prompt_id"`
 	Text     string `json:"text"`
 }
 
-// handleHarvestSubmit writes one harvested answer to pre_launch_submissions.
-// Mirrors the shape of handleAPIDecoySubmit but targets the harvest table
+// handlePrelaunchSubmit writes one prelaunched answer to pre_launch_submissions.
+// Mirrors the shape of handleAPIDecoySubmit but targets the prelaunch table
 // only — nothing here ever touches decoy_submissions.
-func (s *Server) handleHarvestSubmit(w http.ResponseWriter, r *http.Request) {
-	var body harvestSubmitReq
+func (s *Server) handlePrelaunchSubmit(w http.ResponseWriter, r *http.Request) {
+	var body prelaunchSubmitReq
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSONErr(w, http.StatusBadRequest, "bad_body", "")
 		return
@@ -119,44 +119,44 @@ func (s *Server) handleHarvestSubmit(w http.ResponseWriter, r *http.Request) {
 
 	// Rate limit. Both device and IP must allow. Looser than the regular
 	// decoy endpoint because this is the campaign's burst path.
-	if !s.allowHarvestSubmit(ctx, w, "harvest_submit:device:"+u.ID.String(), harvestSubmitDeviceCapacity, harvestSubmitDeviceRefill) {
+	if !s.allowPrelaunchSubmit(ctx, w, "prelaunch_submit:device:"+u.ID.String(), prelaunchSubmitDeviceCapacity, prelaunchSubmitDeviceRefill) {
 		return
 	}
-	if !s.allowHarvestSubmit(ctx, w, "harvest_submit:ip:"+clientIP(r), harvestSubmitIPCapacity, harvestSubmitIPRefill) {
+	if !s.allowPrelaunchSubmit(ctx, w, "prelaunch_submit:ip:"+clientIP(r), prelaunchSubmitIPCapacity, prelaunchSubmitIPRefill) {
 		return
 	}
 
 	// Insert. The partial unique index catches the rare TOCTOU race; we
 	// surface that as already_submitted (with the existing row's id so the
 	// client can recover) rather than a raw pg error.
-	id, err := s.cfg.DB.InsertHarvestSubmission(ctx, u.ID, promptID, body.Text, clientIP(r))
+	id, err := s.cfg.DB.InsertPrelaunchSubmission(ctx, u.ID, promptID, body.Text, clientIP(r))
 	if err != nil {
-		if errors.Is(err, db.ErrHarvestAlreadySubmitted) {
-			existingID, _ := s.cfg.DB.HarvestSubmissionForUserAndPrompt(ctx, u.ID, promptID)
+		if errors.Is(err, db.ErrPrelaunchAlreadySubmitted) {
+			existingID, _ := s.cfg.DB.PrelaunchSubmissionForUserAndPrompt(ctx, u.ID, promptID)
 			writeJSON(w, http.StatusConflict, map[string]any{
 				"code":         "already_submitted",
 				"existing_id":  existingID,
 			})
 			return
 		}
-		s.cfg.Logger.Warn("harvest_submit insert", "err", err)
+		s.cfg.Logger.Warn("prelaunch_submit insert", "err", err)
 		writeJSONErr(w, http.StatusInternalServerError, "submit_failed", "")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": id})
 }
 
-// harvestDeckFor builds the per-user deck on top of a cached eligible-prompt
+// prelaunchDeckFor builds the per-user deck on top of a cached eligible-prompt
 // pool. The pool ignores the per-user "already answered" filter (so it can
-// be shared across all harvesters) and lives in ValKey for 60s — see plan
+// be shared across all prelaunchers) and lives in ValKey for 60s — see plan
 // §2.7 shared-candidate-pool option. The per-user filter is a small
 // indexed SELECT in Postgres.
-func (s *Server) harvestDeckFor(ctx context.Context, userID uuid.UUID) ([]db.HarvestPrompt, error) {
-	pool, err := s.loadHarvestPool(ctx)
+func (s *Server) prelaunchDeckFor(ctx context.Context, userID uuid.UUID) ([]db.PrelaunchPrompt, error) {
+	pool, err := s.loadPrelaunchPool(ctx)
 	if err != nil {
 		return nil, err
 	}
-	submittedIDs, err := s.cfg.DB.HarvestSubmittedPromptIDs(ctx, userID)
+	submittedIDs, err := s.cfg.DB.PrelaunchSubmittedPromptIDs(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +164,7 @@ func (s *Server) harvestDeckFor(ctx context.Context, userID uuid.UUID) ([]db.Har
 	for _, id := range submittedIDs {
 		skip[id] = struct{}{}
 	}
-	eligible := make([]db.HarvestPrompt, 0, len(pool))
+	eligible := make([]db.PrelaunchPrompt, 0, len(pool))
 	for _, p := range pool {
 		if _, blocked := skip[p.ID]; blocked {
 			continue
@@ -172,28 +172,28 @@ func (s *Server) harvestDeckFor(ctx context.Context, userID uuid.UUID) ([]db.Har
 		eligible = append(eligible, p)
 	}
 	cryptoShuffle(eligible)
-	if len(eligible) > harvestDeckSize {
-		eligible = eligible[:harvestDeckSize]
+	if len(eligible) > prelaunchDeckSize {
+		eligible = eligible[:prelaunchDeckSize]
 	}
 	return eligible, nil
 }
 
-func (s *Server) loadHarvestPool(ctx context.Context) ([]db.HarvestPrompt, error) {
+func (s *Server) loadPrelaunchPool(ctx context.Context) ([]db.PrelaunchPrompt, error) {
 	if s.cfg.Cache.Enabled() {
-		if b, ok := s.cfg.Cache.Get(ctx, harvestPoolCacheNS, harvestPoolCacheKey); ok {
-			var out []db.HarvestPrompt
+		if b, ok := s.cfg.Cache.Get(ctx, prelaunchPoolCacheNS, prelaunchPoolCacheKey); ok {
+			var out []db.PrelaunchPrompt
 			if err := json.Unmarshal(b, &out); err == nil {
 				return out, nil
 			}
 		}
 	}
-	pool, err := s.cfg.DB.HarvestEligiblePool(ctx)
+	pool, err := s.cfg.DB.PrelaunchEligiblePool(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if s.cfg.Cache.Enabled() {
 		if b, err := json.Marshal(pool); err == nil {
-			s.cfg.Cache.Set(ctx, harvestPoolCacheNS, harvestPoolCacheKey, b, harvestPoolCacheTTL)
+			s.cfg.Cache.Set(ctx, prelaunchPoolCacheNS, prelaunchPoolCacheKey, b, prelaunchPoolCacheTTL)
 		}
 	}
 	return pool, nil
@@ -202,7 +202,7 @@ func (s *Server) loadHarvestPool(ctx context.Context) ([]db.HarvestPrompt, error
 // cryptoShuffle is a Fisher–Yates shuffle backed by crypto/rand so the deck
 // order leaks nothing about server time or PID. Cost is fine at deck size
 // (the entire eligible pool is ~hundreds at v1).
-func cryptoShuffle(p []db.HarvestPrompt) {
+func cryptoShuffle(p []db.PrelaunchPrompt) {
 	for i := len(p) - 1; i > 0; i-- {
 		var b [4]byte
 		if _, err := rand.Read(b[:]); err != nil {
@@ -213,7 +213,7 @@ func cryptoShuffle(p []db.HarvestPrompt) {
 	}
 }
 
-func (s *Server) allowHarvestSubmit(ctx context.Context, w http.ResponseWriter, key string, capacity int, refillPerHour float64) bool {
+func (s *Server) allowPrelaunchSubmit(ctx context.Context, w http.ResponseWriter, key string, capacity int, refillPerHour float64) bool {
 	ok, retry, err := s.limiter.Allow(ctx, key, capacity, refillPerHour)
 	if err != nil {
 		s.cfg.Logger.Warn("ratelimit allow failed", "key", key, "err", err)

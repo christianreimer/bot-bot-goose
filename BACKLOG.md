@@ -32,17 +32,17 @@ Each item links to the plan's build-order step it's part of.
 
 **Schema is already in place** (`magic_links` table, `users.email`, `users.email_verified_at`).
 
-### Harvest promotion tool
+### Prelaunch promotion tool
 
-**Why it matters.** The Phase-0 collection campaign (`/harvest`) lands rows in `pre_launch_submissions`. They never auto-flow into the live game — that's the safety boundary. Today, promoting a hand-picked harvested answer into `decoy_submissions` is a SQL one-liner; once the campaign is generating volume, a reviewer UI keeps the gate cheap to operate.
+**Why it matters.** The Phase-0 collection campaign (`/prelaunch`) lands rows in `pre_launch_submissions`. They never auto-flow into the live game — that's the safety boundary. Today, promoting a hand-picked prelaunched answer into `decoy_submissions` is a SQL one-liner; once the campaign is generating volume, a reviewer UI keeps the gate cheap to operate.
 
 **What's needed.**
 
-- A page at `/admin/harvest` listing harvested rows (with prompt + author IP for spam triage), filterable by "not yet promoted."
+- A page at `/admin/prelaunch` listing prelaunched rows (with prompt + author IP for spam triage), filterable by "not yet promoted."
 - One-click promotion that inserts into `decoy_submissions(status='approved')` and sets `pre_launch_submissions.ingested_decoy_id`.
 - Bulk reject / hide for obvious spam.
 
-**Where to start.** Same role-gate pattern as the moderation queue UI above. The promotion SQL is already in `plans/harvest.md`'s verification section.
+**Where to start.** Same role-gate pattern as the moderation queue UI above. The promotion SQL is already in `plans/prelaunch.md`'s verification section.
 
 ### AI-detection on submitted decoys
 

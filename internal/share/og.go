@@ -148,7 +148,7 @@ func RenderResultOG(r ResultOG) ([]byte, error) {
 // Generic across decoys (no per-decoy text rendered into the image) so
 // callers can cache it indefinitely. The page-level og:title carries the
 // per-decoy "X% thought this was a bot" stat; this image is the brand
-// poster underneath. Same editorial composition as the harvest card.
+// poster underneath. Same editorial composition as the prelaunch card.
 func RenderDecoyShareOG() ([]byte, error) {
 	img := image.NewRGBA(image.Rect(0, 0, OGWidth, OGHeight))
 	fill(img, img.Bounds(), colorPondDeep)
@@ -186,31 +186,31 @@ func RenderDecoyShareOG() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// HarvestOGBytes / DecoyOGBytes return precomputed PNG bytes for the two
+// PrelaunchOGBytes / DecoyOGBytes return precomputed PNG bytes for the two
 // static unfurl cards. Built once at first call (or via WarmStaticOG at
 // boot) and shared across requests so the handler skips the ~80ms render
 // path entirely. The slices are never mutated; callers can safely w.Write
 // them directly.
 var (
 	staticOGOnce       sync.Once
-	staticOGHarvestPNG []byte
-	staticOGHarvestErr error
+	staticOGPrelaunchPNG []byte
+	staticOGPrelaunchErr error
 	staticOGDecoyPNG   []byte
 	staticOGDecoyErr   error
 )
 
 func warmStaticOG() {
 	staticOGOnce.Do(func() {
-		staticOGHarvestPNG, staticOGHarvestErr = renderHarvestOG()
+		staticOGPrelaunchPNG, staticOGPrelaunchErr = renderPrelaunchOG()
 		staticOGDecoyPNG, staticOGDecoyErr = RenderDecoyShareOG()
 	})
 }
 
-// HarvestOGBytes returns the cached /harvest/og.png bytes. First call pays
+// PrelaunchOGBytes returns the cached /prelaunch/og.png bytes. First call pays
 // the render cost; subsequent calls are pointer-cheap.
-func HarvestOGBytes() ([]byte, error) {
+func PrelaunchOGBytes() ([]byte, error) {
 	warmStaticOG()
-	return staticOGHarvestPNG, staticOGHarvestErr
+	return staticOGPrelaunchPNG, staticOGPrelaunchErr
 }
 
 // DecoyOGBytes returns the cached /d/<short>/og.png bytes. The image is
@@ -223,17 +223,17 @@ func DecoyOGBytes() ([]byte, error) {
 }
 
 // WarmStaticOG eagerly precomputes the static cards. Optional — the lazy
-// path in HarvestOGBytes/DecoyOGBytes does the same thing, but calling
+// path in PrelaunchOGBytes/DecoyOGBytes does the same thing, but calling
 // this at server boot moves the cost off the first user-facing request.
 func WarmStaticOG() { warmStaticOG() }
 
-// RenderHarvestOG produces the static unfurl card for the /harvest landing
-// page. The handler should call HarvestOGBytes; this function exists so
+// RenderPrelaunchOG produces the static unfurl card for the /prelaunch landing
+// page. The handler should call PrelaunchOGBytes; this function exists so
 // callers that want a fresh render (e.g. cmd/og-render for previewing in
 // a browser) can bypass the cache.
-func RenderHarvestOG() ([]byte, error) { return renderHarvestOG() }
+func RenderPrelaunchOG() ([]byte, error) { return renderPrelaunchOG() }
 
-func renderHarvestOG() ([]byte, error) {
+func renderPrelaunchOG() ([]byte, error) {
 	img := image.NewRGBA(image.Rect(0, 0, OGWidth, OGHeight))
 	fill(img, img.Bounds(), colorPondDeep)
 
@@ -273,7 +273,7 @@ func renderHarvestOG() ([]byte, error) {
 	drawString(img, face28, "Your answers go into future rounds.", 320, 392, colorMuted)
 
 	// Footer line, brand-anchored.
-	drawString(img, face18, "botbotgoose.fun/harvest", 320, OGHeight-58, colorHonk)
+	drawString(img, face18, "botbotgoose.fun/prelaunch", 320, OGHeight-58, colorHonk)
 
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {

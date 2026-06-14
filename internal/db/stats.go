@@ -21,16 +21,16 @@ type StatOverview struct {
 	DecoysApproved       int // status='approved' submitted_at >= since
 	DecoysPending        int // status='pending'  submitted_at >= since
 	DecoysRejected       int // status='rejected' submitted_at >= since
-	HarvestSubmitted     int // consent_at >= since
-	HarvestIngested      int // ingested_decoy_id IS NOT NULL, consent_at >= since
-	HarvestRejected      int // rejected_at IS NOT NULL, consent_at >= since
-	HarvestUniqueDevices int // distinct user_id in window
+	PrelaunchSubmitted     int // consent_at >= since
+	PrelaunchIngested      int // ingested_decoy_id IS NOT NULL, consent_at >= since
+	PrelaunchRejected      int // rejected_at IS NOT NULL, consent_at >= since
+	PrelaunchUniqueDevices int // distinct user_id in window
 	// All-time pool inventory (NOT windowed — what's currently live):
 	ApprovedDecoyPool int
 	ApprovedBotPool   int
 	PendingDecoyPool  int
 	PendingBotPool    int
-	PendingHarvest    int // ingested IS NULL AND rejected IS NULL
+	PendingPrelaunch    int // ingested IS NULL AND rejected IS NULL
 }
 
 // StatOverview computes the snapshot in one tx-free pass. Each query is cheap
@@ -78,7 +78,7 @@ func (d *DB) StatOverview(ctx context.Context, since time.Time) (*StatOverview, 
 		  count(DISTINCT user_id)
 		FROM pre_launch_submissions
 		WHERE consent_at >= $1
-	`, since).Scan(&s.HarvestSubmitted, &s.HarvestIngested, &s.HarvestRejected, &s.HarvestUniqueDevices); err != nil {
+	`, since).Scan(&s.PrelaunchSubmitted, &s.PrelaunchIngested, &s.PrelaunchRejected, &s.PrelaunchUniqueDevices); err != nil {
 		return nil, err
 	}
 	if err := d.QueryRow(ctx, `
@@ -88,7 +88,7 @@ func (d *DB) StatOverview(ctx context.Context, since time.Time) (*StatOverview, 
 		  (SELECT count(*) FROM decoy_submissions WHERE status='pending'  AND deleted_at IS NULL),
 		  (SELECT count(*) FROM bot_candidates    WHERE status='pending'),
 		  (SELECT count(*) FROM pre_launch_submissions WHERE ingested_decoy_id IS NULL AND rejected_at IS NULL)
-	`).Scan(&s.ApprovedDecoyPool, &s.ApprovedBotPool, &s.PendingDecoyPool, &s.PendingBotPool, &s.PendingHarvest); err != nil {
+	`).Scan(&s.ApprovedDecoyPool, &s.ApprovedBotPool, &s.PendingDecoyPool, &s.PendingBotPool, &s.PendingPrelaunch); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -204,8 +204,8 @@ func (d *DB) DecoysByDay(ctx context.Context, since time.Time) ([]DecoysByDay, e
 	return out, rows.Err()
 }
 
-// HarvestByDay is one row of the daily-harvest time series.
-type HarvestByDay struct {
+// PrelaunchByDay is one row of the daily-prelaunch time series.
+type PrelaunchByDay struct {
 	Day            time.Time
 	Submitted      int
 	Ingested       int
@@ -214,8 +214,8 @@ type HarvestByDay struct {
 	UniqueDevices  int
 }
 
-// HarvestByDay returns one row per day in [since, now], oldest first.
-func (d *DB) HarvestByDay(ctx context.Context, since time.Time) ([]HarvestByDay, error) {
+// PrelaunchByDay returns one row per day in [since, now], oldest first.
+func (d *DB) PrelaunchByDay(ctx context.Context, since time.Time) ([]PrelaunchByDay, error) {
 	const q = `
 		WITH days AS (
 		    SELECT generate_series(date_trunc('day', $1::timestamptz),
@@ -247,9 +247,9 @@ func (d *DB) HarvestByDay(ctx context.Context, since time.Time) ([]HarvestByDay,
 		return nil, err
 	}
 	defer rows.Close()
-	var out []HarvestByDay
+	var out []PrelaunchByDay
 	for rows.Next() {
-		var r HarvestByDay
+		var r PrelaunchByDay
 		if err := rows.Scan(&r.Day, &r.Submitted, &r.Ingested, &r.Rejected, &r.StillPending, &r.UniqueDevices); err != nil {
 			return nil, err
 		}

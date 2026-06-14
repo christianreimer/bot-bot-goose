@@ -10,9 +10,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// HarvestSubmission is one row from pre_launch_submissions joined to its prompt.
+// PrelaunchSubmission is one row from pre_launch_submissions joined to its prompt.
 // The reviewer-facing view: enough to decide keep/toss without a second query.
-type HarvestSubmission struct {
+type PrelaunchSubmission struct {
 	ID             uuid.UUID
 	PromptID       uuid.UUID
 	PromptText     string
@@ -25,25 +25,25 @@ type HarvestSubmission struct {
 	RequestedIP    *string
 }
 
-// HarvestStatus is the derived three-way state used by the reviewer surface.
-type HarvestStatus string
+// PrelaunchStatus is the derived three-way state used by the reviewer surface.
+type PrelaunchStatus string
 
 const (
-	HarvestPending  HarvestStatus = "pending"  // ingested_decoy_id IS NULL AND rejected_at IS NULL
-	HarvestApproved HarvestStatus = "approved" // ingested_decoy_id IS NOT NULL
-	HarvestRejected HarvestStatus = "rejected" // rejected_at IS NOT NULL
+	PrelaunchPending  PrelaunchStatus = "pending"  // ingested_decoy_id IS NULL AND rejected_at IS NULL
+	PrelaunchApproved PrelaunchStatus = "approved" // ingested_decoy_id IS NOT NULL
+	PrelaunchRejected PrelaunchStatus = "rejected" // rejected_at IS NOT NULL
 )
 
-// HarvestListOpts filters and bounds a harvest listing.
-type HarvestListOpts struct {
-	Status   *HarvestStatus
+// PrelaunchListOpts filters and bounds a prelaunch listing.
+type PrelaunchListOpts struct {
+	Status   *PrelaunchStatus
 	PromptID *uuid.UUID
 	Limit    int
 	Offset   int
 }
 
-// ListHarvest returns harvest submissions joined with prompt text, newest first.
-func (d *DB) ListHarvest(ctx context.Context, opts HarvestListOpts) ([]HarvestSubmission, error) {
+// ListPrelaunch returns prelaunch submissions joined with prompt text, newest first.
+func (d *DB) ListPrelaunch(ctx context.Context, opts PrelaunchListOpts) ([]PrelaunchSubmission, error) {
 	q := `
 		SELECT pls.id, pls.prompt_id, p.text, pls.user_id, pls.email, pls.text,
 		       pls.consent_at, pls.ingested_decoy_id, pls.rejected_at,
@@ -54,14 +54,14 @@ func (d *DB) ListHarvest(ctx context.Context, opts HarvestListOpts) ([]HarvestSu
 	args := []any{}
 	if opts.Status != nil {
 		switch *opts.Status {
-		case HarvestPending:
+		case PrelaunchPending:
 			q += " AND pls.ingested_decoy_id IS NULL AND pls.rejected_at IS NULL"
-		case HarvestApproved:
+		case PrelaunchApproved:
 			q += " AND pls.ingested_decoy_id IS NOT NULL"
-		case HarvestRejected:
+		case PrelaunchRejected:
 			q += " AND pls.rejected_at IS NOT NULL"
 		default:
-			return nil, fmt.Errorf("invalid harvest status %q", *opts.Status)
+			return nil, fmt.Errorf("invalid prelaunch status %q", *opts.Status)
 		}
 	}
 	if opts.PromptID != nil {
@@ -82,9 +82,9 @@ func (d *DB) ListHarvest(ctx context.Context, opts HarvestListOpts) ([]HarvestSu
 		return nil, err
 	}
 	defer rows.Close()
-	var out []HarvestSubmission
+	var out []PrelaunchSubmission
 	for rows.Next() {
-		var h HarvestSubmission
+		var h PrelaunchSubmission
 		if err := rows.Scan(
 			&h.ID, &h.PromptID, &h.PromptText, &h.UserID, &h.Email, &h.Text,
 			&h.ConsentAt, &h.IngestedDecoy, &h.RejectedAt, &h.RequestedIP,
@@ -96,8 +96,8 @@ func (d *DB) ListHarvest(ctx context.Context, opts HarvestListOpts) ([]HarvestSu
 	return out, rows.Err()
 }
 
-// HarvestByID returns one harvest submission or ErrNotFound.
-func (d *DB) HarvestByID(ctx context.Context, id uuid.UUID) (*HarvestSubmission, error) {
+// PrelaunchByID returns one prelaunch submission or ErrNotFound.
+func (d *DB) PrelaunchByID(ctx context.Context, id uuid.UUID) (*PrelaunchSubmission, error) {
 	const q = `
 		SELECT pls.id, pls.prompt_id, p.text, pls.user_id, pls.email, pls.text,
 		       pls.consent_at, pls.ingested_decoy_id, pls.rejected_at,
@@ -105,7 +105,7 @@ func (d *DB) HarvestByID(ctx context.Context, id uuid.UUID) (*HarvestSubmission,
 		  FROM pre_launch_submissions pls
 		  JOIN prompts p ON p.id = pls.prompt_id
 		 WHERE pls.id = $1`
-	h := &HarvestSubmission{}
+	h := &PrelaunchSubmission{}
 	err := d.QueryRow(ctx, q, id).Scan(
 		&h.ID, &h.PromptID, &h.PromptText, &h.UserID, &h.Email, &h.Text,
 		&h.ConsentAt, &h.IngestedDecoy, &h.RejectedAt, &h.RequestedIP,
@@ -119,11 +119,11 @@ func (d *DB) HarvestByID(ctx context.Context, id uuid.UUID) (*HarvestSubmission,
 	return h, nil
 }
 
-// HarvestPromptRollup is one row of the prompt-by-prompt harvest dashboard:
+// PrelaunchPromptRollup is one row of the prompt-by-prompt prelaunch dashboard:
 // how many live, ingested, and rejected submissions a prompt has accumulated.
 // Listed in the order the reviewer cares about: which prompts are most
 // undersupplied right now.
-type HarvestPromptRollup struct {
+type PrelaunchPromptRollup struct {
 	PromptID    uuid.UUID
 	PromptText  string
 	Pending     int // ingested_decoy_id IS NULL AND rejected_at IS NULL
@@ -132,9 +132,9 @@ type HarvestPromptRollup struct {
 	ApprovedDec int // count of approved live decoys for this prompt (the live pool)
 }
 
-// HarvestPromptCounts returns per-prompt rollups for all non-retired prompts.
+// PrelaunchPromptCounts returns per-prompt rollups for all non-retired prompts.
 // Caller orders/filters in the UI layer.
-func (d *DB) HarvestPromptCounts(ctx context.Context) ([]HarvestPromptRollup, error) {
+func (d *DB) PrelaunchPromptCounts(ctx context.Context) ([]PrelaunchPromptRollup, error) {
 	const q = `
 		SELECT p.id, p.text,
 		       COUNT(*) FILTER (WHERE pls.ingested_decoy_id IS NULL
@@ -155,9 +155,9 @@ func (d *DB) HarvestPromptCounts(ctx context.Context) ([]HarvestPromptRollup, er
 		return nil, err
 	}
 	defer rows.Close()
-	var out []HarvestPromptRollup
+	var out []PrelaunchPromptRollup
 	for rows.Next() {
-		var r HarvestPromptRollup
+		var r PrelaunchPromptRollup
 		if err := rows.Scan(
 			&r.PromptID, &r.PromptText,
 			&r.Pending, &r.Ingested, &r.Rejected, &r.ApprovedDec,
@@ -169,12 +169,12 @@ func (d *DB) HarvestPromptCounts(ctx context.Context) ([]HarvestPromptRollup, er
 	return out, rows.Err()
 }
 
-// ErrHarvestAlreadyDecided is returned when a reviewer tries to act on a
+// ErrPrelaunchAlreadyDecided is returned when a reviewer tries to act on a
 // submission that's already ingested or already rejected. Callers map this to
 // `code: "already_decided"` for agents.
-var ErrHarvestAlreadyDecided = errors.New("harvest submission already decided (ingested or rejected)")
+var ErrPrelaunchAlreadyDecided = errors.New("prelaunch submission already decided (ingested or rejected)")
 
-// ApproveHarvest ingests one pre_launch_submissions row into decoy_submissions
+// ApprovePrelaunch ingests one pre_launch_submissions row into decoy_submissions
 // as a fresh approved decoy in a single transaction:
 //
 //  1. SELECT the pre_launch row (and lock it) — refuse if already decided.
@@ -184,7 +184,7 @@ var ErrHarvestAlreadyDecided = errors.New("harvest submission already decided (i
 //  5. INSERT audit_log row.
 //
 // Returns the new decoy id so the caller can echo it back in the success envelope.
-func (d *DB) ApproveHarvest(ctx context.Context, harvestID, reviewerID uuid.UUID, isTrap bool, note string) (uuid.UUID, error) {
+func (d *DB) ApprovePrelaunch(ctx context.Context, prelaunchID, reviewerID uuid.UUID, isTrap bool, note string) (uuid.UUID, error) {
 	tx, err := d.Begin(ctx)
 	if err != nil {
 		return uuid.Nil, err
@@ -204,7 +204,7 @@ func (d *DB) ApproveHarvest(ctx context.Context, harvestID, reviewerID uuid.UUID
 		  FROM pre_launch_submissions
 		 WHERE id = $1
 		 FOR UPDATE
-	`, harvestID).Scan(&promptID, &text, &userID, &ingestedDecoy, &rejectedAt)
+	`, prelaunchID).Scan(&promptID, &text, &userID, &ingestedDecoy, &rejectedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return uuid.Nil, ErrNotFound
@@ -212,7 +212,7 @@ func (d *DB) ApproveHarvest(ctx context.Context, harvestID, reviewerID uuid.UUID
 		return uuid.Nil, err
 	}
 	if ingestedDecoy != nil || rejectedAt != nil {
-		return uuid.Nil, ErrHarvestAlreadyDecided
+		return uuid.Nil, ErrPrelaunchAlreadyDecided
 	}
 
 	var newDecoyID uuid.UUID
@@ -229,7 +229,7 @@ func (d *DB) ApproveHarvest(ctx context.Context, harvestID, reviewerID uuid.UUID
 		UPDATE pre_launch_submissions
 		   SET ingested_decoy_id = $1
 		 WHERE id = $2
-	`, newDecoyID, harvestID); err != nil {
+	`, newDecoyID, prelaunchID); err != nil {
 		return uuid.Nil, err
 	}
 
@@ -241,15 +241,15 @@ func (d *DB) ApproveHarvest(ctx context.Context, harvestID, reviewerID uuid.UUID
 		INSERT INTO moderation_reviews
 		    (target_kind, target_id, reviewer_user_id, decision, note)
 		VALUES ('pre_launch_submission', $1, $2, 'approved'::moderation_status, $3)
-	`, harvestID, reviewerID, notePtr); err != nil {
+	`, prelaunchID, reviewerID, notePtr); err != nil {
 		return uuid.Nil, err
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO audit_log
 		    (actor_user_id, action, target_kind, target_id, payload)
-		VALUES ($1, 'harvest_approve', 'pre_launch_submission', $2,
+		VALUES ($1, 'prelaunch_approve', 'pre_launch_submission', $2,
 		        jsonb_build_object('decoy_id', $3::text, 'is_trap', $4::bool, 'note', $5::text))
-	`, reviewerID, harvestID, newDecoyID.String(), isTrap, notePtr); err != nil {
+	`, reviewerID, prelaunchID, newDecoyID.String(), isTrap, notePtr); err != nil {
 		return uuid.Nil, err
 	}
 
@@ -259,11 +259,11 @@ func (d *DB) ApproveHarvest(ctx context.Context, harvestID, reviewerID uuid.UUID
 	return newDecoyID, nil
 }
 
-// RejectHarvest soft-rejects a harvest submission by setting rejected_at = NOW()
+// RejectPrelaunch soft-rejects a prelaunch submission by setting rejected_at = NOW()
 // in a single transaction with the moderation_reviews + audit_log rows.
-// Refuses with ErrHarvestAlreadyDecided when the row is already ingested or
+// Refuses with ErrPrelaunchAlreadyDecided when the row is already ingested or
 // already rejected (no re-reject).
-func (d *DB) RejectHarvest(ctx context.Context, harvestID, reviewerID uuid.UUID, note string) error {
+func (d *DB) RejectPrelaunch(ctx context.Context, prelaunchID, reviewerID uuid.UUID, note string) error {
 	tx, err := d.Begin(ctx)
 	if err != nil {
 		return err
@@ -279,7 +279,7 @@ func (d *DB) RejectHarvest(ctx context.Context, harvestID, reviewerID uuid.UUID,
 		  FROM pre_launch_submissions
 		 WHERE id = $1
 		 FOR UPDATE
-	`, harvestID).Scan(&ingestedDecoy, &rejectedAt)
+	`, prelaunchID).Scan(&ingestedDecoy, &rejectedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
@@ -287,12 +287,12 @@ func (d *DB) RejectHarvest(ctx context.Context, harvestID, reviewerID uuid.UUID,
 		return err
 	}
 	if ingestedDecoy != nil || rejectedAt != nil {
-		return ErrHarvestAlreadyDecided
+		return ErrPrelaunchAlreadyDecided
 	}
 
 	if _, err := tx.Exec(ctx, `
 		UPDATE pre_launch_submissions SET rejected_at = NOW() WHERE id = $1
-	`, harvestID); err != nil {
+	`, prelaunchID); err != nil {
 		return err
 	}
 
@@ -304,15 +304,15 @@ func (d *DB) RejectHarvest(ctx context.Context, harvestID, reviewerID uuid.UUID,
 		INSERT INTO moderation_reviews
 		    (target_kind, target_id, reviewer_user_id, decision, note)
 		VALUES ('pre_launch_submission', $1, $2, 'rejected'::moderation_status, $3)
-	`, harvestID, reviewerID, notePtr); err != nil {
+	`, prelaunchID, reviewerID, notePtr); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO audit_log
 		    (actor_user_id, action, target_kind, target_id, payload)
-		VALUES ($1, 'harvest_reject', 'pre_launch_submission', $2,
+		VALUES ($1, 'prelaunch_reject', 'pre_launch_submission', $2,
 		        jsonb_build_object('note', $3::text))
-	`, reviewerID, harvestID, notePtr); err != nil {
+	`, reviewerID, prelaunchID, notePtr); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

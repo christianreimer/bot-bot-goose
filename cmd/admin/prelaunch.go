@@ -14,39 +14,39 @@ import (
 	"github.com/google/uuid"
 )
 
-// runHarvest dispatches `bbg-admin harvest <verb>`. Drives the reviewer
+// runPrelaunch dispatches `bbg-admin prelaunch <verb>`. Drives the reviewer
 // workflow over pre_launch_submissions: list per prompt, inspect one,
 // approve (ingest into decoy_submissions), reject (soft via rejected_at),
 // or roll up prompt counts to find the most undersupplied targets.
-func runHarvest(ctx context.Context, log *slog.Logger) error {
+func runPrelaunch(ctx context.Context, log *slog.Logger) error {
 	if len(os.Args) < 2 {
-		harvestUsage()
+		prelaunchUsage()
 		os.Exit(2)
 	}
 	verb := os.Args[1]
 	os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
 	switch verb {
 	case "list":
-		return harvestList(ctx, log)
+		return prelaunchList(ctx, log)
 	case "show":
-		return harvestShow(ctx, log)
+		return prelaunchShow(ctx, log)
 	case "review":
-		return harvestReview(ctx, log)
+		return prelaunchReview(ctx, log)
 	case "bulk-review":
-		return harvestBulkReview(ctx, log)
+		return prelaunchBulkReview(ctx, log)
 	case "prompts":
-		return harvestPrompts(ctx, log)
+		return prelaunchPrompts(ctx, log)
 	default:
-		harvestUsage()
+		prelaunchUsage()
 		os.Exit(2)
 	}
 	return nil
 }
 
-func harvestUsage() {
-	fmt.Fprintln(os.Stderr, `usage: bbg-admin harvest <verb> [flags]
+func prelaunchUsage() {
+	fmt.Fprintln(os.Stderr, `usage: bbg-admin prelaunch <verb> [flags]
   list         List pre_launch_submissions with filters.
-  show         Show one harvested submission by id.
+  show         Show one prelaunched submission by id.
   review       Decide one submission (approve | reject).
   bulk-review  Apply the same decision to many submissions at once.
   prompts      Per-prompt rollup of pending / ingested / rejected counts.`)
@@ -54,8 +54,8 @@ func harvestUsage() {
 
 // --- list --------------------------------------------------------------------
 
-func harvestList(ctx context.Context, log *slog.Logger) error {
-	fs := flag.NewFlagSet("harvest list", flag.ExitOnError)
+func prelaunchList(ctx context.Context, log *slog.Logger) error {
+	fs := flag.NewFlagSet("prelaunch list", flag.ExitOnError)
 	dbf := registerDBFlags(fs)
 	status := fs.String("status", "pending", "pending|approved|rejected")
 	promptIDStr := fs.String("prompt-id", "", "filter by prompt UUID")
@@ -65,11 +65,11 @@ func harvestList(ctx context.Context, log *slog.Logger) error {
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
 	}
-	if !validHarvestStatus(*status) {
+	if !validPrelaunchStatus(*status) {
 		return emitError("invalid", "--status must be pending|approved|rejected", nil)
 	}
-	st := db.HarvestStatus(*status)
-	opts := db.HarvestListOpts{Status: &st, Limit: *limit, Offset: *offset}
+	st := db.PrelaunchStatus(*status)
+	opts := db.PrelaunchListOpts{Status: &st, Limit: *limit, Offset: *offset}
 	if *promptIDStr != "" {
 		id, err := uuid.Parse(*promptIDStr)
 		if err != nil {
@@ -82,7 +82,7 @@ func harvestList(ctx context.Context, log *slog.Logger) error {
 		return err
 	}
 	defer d.Close()
-	rows, err := d.ListHarvest(ctx, opts)
+	rows, err := d.ListPrelaunch(ctx, opts)
 	if err != nil {
 		return emitError("db", err.Error(), nil)
 	}
@@ -98,40 +98,40 @@ func harvestList(ctx context.Context, log *slog.Logger) error {
 		}
 		return emitTable([]string{"ID", "AT", "PROMPT", "TEXT"}, out)
 	}
-	return emitJSON(harvestsToJSON(rows))
+	return emitJSON(prelaunchsToJSON(rows))
 }
 
 // --- show --------------------------------------------------------------------
 
-func harvestShow(ctx context.Context, log *slog.Logger) error {
-	fs := flag.NewFlagSet("harvest show", flag.ExitOnError)
+func prelaunchShow(ctx context.Context, log *slog.Logger) error {
+	fs := flag.NewFlagSet("prelaunch show", flag.ExitOnError)
 	dbf := registerDBFlags(fs)
 	asTable := fs.Bool("table", false, "human-readable view")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
 	}
 	if fs.NArg() < 1 {
-		return emitError("invalid", "harvest id (UUID) is required", nil)
+		return emitError("invalid", "prelaunch id (UUID) is required", nil)
 	}
 	id, err := uuid.Parse(fs.Arg(0))
 	if err != nil {
-		return emitError("invalid", "parse harvest id: "+err.Error(), nil)
+		return emitError("invalid", "parse prelaunch id: "+err.Error(), nil)
 	}
 	d, err := openDB(ctx, dbf, log)
 	if err != nil {
 		return err
 	}
 	defer d.Close()
-	h, err := d.HarvestByID(ctx, id)
+	h, err := d.PrelaunchByID(ctx, id)
 	if err != nil {
 		if db.IsNotFound(err) {
-			return emitError("not_found", "harvest submission not found", map[string]any{"id": id.String()})
+			return emitError("not_found", "prelaunch submission not found", map[string]any{"id": id.String()})
 		}
 		return emitError("db", err.Error(), nil)
 	}
 	if *asTable {
-		fmt.Fprintf(os.Stdout, "Harvest %s\n", h.ID)
-		fmt.Fprintf(os.Stdout, "Status:    %s\n", deriveHarvestStatus(h))
+		fmt.Fprintf(os.Stdout, "Prelaunch %s\n", h.ID)
+		fmt.Fprintf(os.Stdout, "Status:    %s\n", derivePrelaunchStatus(h))
 		fmt.Fprintf(os.Stdout, "Submitted: %s\n", h.ConsentAt.UTC().Format(time.RFC3339))
 		fmt.Fprintf(os.Stdout, "Prompt:    %s\n", h.PromptText)
 		fmt.Fprintf(os.Stdout, "Text:      %s\n", h.Text)
@@ -146,13 +146,13 @@ func harvestShow(ctx context.Context, log *slog.Logger) error {
 		}
 		return nil
 	}
-	return emitJSON(harvestToJSON(h))
+	return emitJSON(prelaunchToJSON(h))
 }
 
 // --- review ------------------------------------------------------------------
 
-func harvestReview(ctx context.Context, log *slog.Logger) error {
-	fs := flag.NewFlagSet("harvest review", flag.ExitOnError)
+func prelaunchReview(ctx context.Context, log *slog.Logger) error {
+	fs := flag.NewFlagSet("prelaunch review", flag.ExitOnError)
 	dbf := registerDBFlags(fs)
 	decision := fs.String("decision", "", "approve|reject (required)")
 	note := fs.String("note", "", "moderation note")
@@ -162,13 +162,13 @@ func harvestReview(ctx context.Context, log *slog.Logger) error {
 		return err
 	}
 	if fs.NArg() < 1 {
-		return emitError("invalid", "harvest id (UUID) is required", nil)
+		return emitError("invalid", "prelaunch id (UUID) is required", nil)
 	}
-	harvestID, err := uuid.Parse(fs.Arg(0))
+	prelaunchID, err := uuid.Parse(fs.Arg(0))
 	if err != nil {
-		return emitError("invalid", "parse harvest id: "+err.Error(), nil)
+		return emitError("invalid", "parse prelaunch id: "+err.Error(), nil)
 	}
-	verb, ok := mapHarvestDecision(*decision)
+	verb, ok := mapPrelaunchDecision(*decision)
 	if !ok {
 		return emitError("invalid", "--decision must be approve|reject", nil)
 	}
@@ -192,41 +192,41 @@ func harvestReview(ctx context.Context, log *slog.Logger) error {
 	}
 	switch verb {
 	case "approve":
-		newDecoyID, err := d.ApproveHarvest(ctx, harvestID, reviewerID, *isTrap, *note)
+		newDecoyID, err := d.ApprovePrelaunch(ctx, prelaunchID, reviewerID, *isTrap, *note)
 		if err != nil {
-			return harvestErr(err, harvestID)
+			return prelaunchErr(err, prelaunchID)
 		}
-		log.Info("harvest approved", "id", harvestID, "decoy_id", newDecoyID, "reviewer", *reviewerEmail)
+		log.Info("prelaunch approved", "id", prelaunchID, "decoy_id", newDecoyID, "reviewer", *reviewerEmail)
 		return emitOK("review", map[string]any{
-			"harvest_id":  harvestID.String(),
+			"prelaunch_id":  prelaunchID.String(),
 			"decision":    "approve",
 			"decoy_id":    newDecoyID.String(),
 			"is_trap":     *isTrap,
 			"reviewer_id": reviewerID.String(),
 		})
 	case "reject":
-		if err := d.RejectHarvest(ctx, harvestID, reviewerID, *note); err != nil {
-			return harvestErr(err, harvestID)
+		if err := d.RejectPrelaunch(ctx, prelaunchID, reviewerID, *note); err != nil {
+			return prelaunchErr(err, prelaunchID)
 		}
-		log.Info("harvest rejected", "id", harvestID, "reviewer", *reviewerEmail)
+		log.Info("prelaunch rejected", "id", prelaunchID, "reviewer", *reviewerEmail)
 		return emitOK("review", map[string]any{
-			"harvest_id":  harvestID.String(),
+			"prelaunch_id":  prelaunchID.String(),
 			"decision":    "reject",
 			"reviewer_id": reviewerID.String(),
 		})
 	}
-	return nil // unreachable — mapHarvestDecision ensures coverage
+	return nil // unreachable — mapPrelaunchDecision ensures coverage
 }
 
 // --- bulk-review -------------------------------------------------------------
 
-func harvestBulkReview(ctx context.Context, log *slog.Logger) error {
-	fs := flag.NewFlagSet("harvest bulk-review", flag.ExitOnError)
+func prelaunchBulkReview(ctx context.Context, log *slog.Logger) error {
+	fs := flag.NewFlagSet("prelaunch bulk-review", flag.ExitOnError)
 	dbf := registerDBFlags(fs)
 	decision := fs.String("decision", "", "approve|reject (required)")
 	statusFilter := fs.String("status", "pending", "review only submissions with this current status")
 	promptIDStr := fs.String("prompt-id", "", "only submissions for this prompt")
-	idsStr := fs.String("ids", "", "comma-separated harvest UUIDs (overrides --status/--prompt-id)")
+	idsStr := fs.String("ids", "", "comma-separated prelaunch UUIDs (overrides --status/--prompt-id)")
 	note := fs.String("note", "", "moderation note applied to every row")
 	isTrap := fs.Bool("is-trap", false, "approve every row as a trap decoy")
 	reviewerEmail := fs.String("reviewer-email", envOr("BBG_REVIEWER_EMAIL", ""), "email of the reviewing user (required)")
@@ -234,7 +234,7 @@ func harvestBulkReview(ctx context.Context, log *slog.Logger) error {
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
 	}
-	verb, ok := mapHarvestDecision(*decision)
+	verb, ok := mapPrelaunchDecision(*decision)
 	if !ok {
 		return emitError("invalid", "--decision must be approve|reject", nil)
 	}
@@ -272,12 +272,12 @@ func harvestBulkReview(ctx context.Context, log *slog.Logger) error {
 			targetIDs = append(targetIDs, id)
 		}
 	} else {
-		if !validHarvestStatus(*statusFilter) {
+		if !validPrelaunchStatus(*statusFilter) {
 			return emitError("invalid", "--status must be pending|approved|rejected", nil)
 		}
-		st := db.HarvestStatus(*statusFilter)
+		st := db.PrelaunchStatus(*statusFilter)
 		// Pull one extra so a count of limit+1 triggers limit_exceeded.
-		opts := db.HarvestListOpts{Status: &st, Limit: *limit + 1}
+		opts := db.PrelaunchListOpts{Status: &st, Limit: *limit + 1}
 		if *promptIDStr != "" {
 			id, err := uuid.Parse(*promptIDStr)
 			if err != nil {
@@ -285,7 +285,7 @@ func harvestBulkReview(ctx context.Context, log *slog.Logger) error {
 			}
 			opts.PromptID = &id
 		}
-		matched, err := d.ListHarvest(ctx, opts)
+		matched, err := d.ListPrelaunch(ctx, opts)
 		if err != nil {
 			return emitError("db", err.Error(), nil)
 		}
@@ -308,21 +308,21 @@ func harvestBulkReview(ctx context.Context, log *slog.Logger) error {
 	for _, id := range targetIDs {
 		switch verb {
 		case "approve":
-			newDecoyID, err := d.ApproveHarvest(ctx, id, reviewerID, *isTrap, *note)
+			newDecoyID, err := d.ApprovePrelaunch(ctx, id, reviewerID, *isTrap, *note)
 			if err != nil {
-				out = append(out, result{ID: id.String(), Status: "failed", Error: err.Error(), ErrCode: codeForHarvestErr(err)})
+				out = append(out, result{ID: id.String(), Status: "failed", Error: err.Error(), ErrCode: codeForPrelaunchErr(err)})
 				continue
 			}
 			out = append(out, result{ID: id.String(), Status: "reviewed", DecoyID: newDecoyID.String()})
 		case "reject":
-			if err := d.RejectHarvest(ctx, id, reviewerID, *note); err != nil {
-				out = append(out, result{ID: id.String(), Status: "failed", Error: err.Error(), ErrCode: codeForHarvestErr(err)})
+			if err := d.RejectPrelaunch(ctx, id, reviewerID, *note); err != nil {
+				out = append(out, result{ID: id.String(), Status: "failed", Error: err.Error(), ErrCode: codeForPrelaunchErr(err)})
 				continue
 			}
 			out = append(out, result{ID: id.String(), Status: "reviewed"})
 		}
 	}
-	log.Info("bulk harvest review done", "count", len(out), "decision", verb)
+	log.Info("bulk prelaunch review done", "count", len(out), "decision", verb)
 	return emitJSON(map[string]any{
 		"decision":    verb,
 		"reviewer_id": reviewerID.String(),
@@ -333,8 +333,8 @@ func harvestBulkReview(ctx context.Context, log *slog.Logger) error {
 
 // --- prompts (per-prompt rollup) ---------------------------------------------
 
-func harvestPrompts(ctx context.Context, log *slog.Logger) error {
-	fs := flag.NewFlagSet("harvest prompts", flag.ExitOnError)
+func prelaunchPrompts(ctx context.Context, log *slog.Logger) error {
+	fs := flag.NewFlagSet("prelaunch prompts", flag.ExitOnError)
 	dbf := registerDBFlags(fs)
 	asTable := fs.Bool("table", false, "human-readable table instead of JSON")
 	if err := fs.Parse(os.Args[1:]); err != nil {
@@ -348,7 +348,7 @@ func harvestPrompts(ctx context.Context, log *slog.Logger) error {
 		return err
 	}
 	defer d.Close()
-	rollups, err := d.HarvestPromptCounts(ctx)
+	rollups, err := d.PrelaunchPromptCounts(ctx)
 	if err != nil {
 		return emitError("db", err.Error(), nil)
 	}
@@ -390,7 +390,7 @@ func harvestPrompts(ctx context.Context, log *slog.Logger) error {
 
 // --- helpers -----------------------------------------------------------------
 
-func validHarvestStatus(s string) bool {
+func validPrelaunchStatus(s string) bool {
 	switch s {
 	case "pending", "approved", "rejected":
 		return true
@@ -398,10 +398,10 @@ func validHarvestStatus(s string) bool {
 	return false
 }
 
-// mapHarvestDecision returns the normalized verb ("approve" | "reject") so the
-// caller can switch on it. Distinct from decoy's mapDecision because harvest
+// mapPrelaunchDecision returns the normalized verb ("approve" | "reject") so the
+// caller can switch on it. Distinct from decoy's mapDecision because prelaunch
 // has no retire and no retry-already-decided.
-func mapHarvestDecision(s string) (string, bool) {
+func mapPrelaunchDecision(s string) (string, bool) {
 	switch s {
 	case "approve", "approved":
 		return "approve", true
@@ -412,29 +412,29 @@ func mapHarvestDecision(s string) (string, bool) {
 	}
 }
 
-func harvestErr(err error, harvestID uuid.UUID) error {
+func prelaunchErr(err error, prelaunchID uuid.UUID) error {
 	switch {
 	case db.IsNotFound(err):
-		return emitError("not_found", "harvest submission not found", map[string]any{"id": harvestID.String()})
-	case errors.Is(err, db.ErrHarvestAlreadyDecided):
-		return emitError("already_decided", err.Error(), map[string]any{"id": harvestID.String()})
+		return emitError("not_found", "prelaunch submission not found", map[string]any{"id": prelaunchID.String()})
+	case errors.Is(err, db.ErrPrelaunchAlreadyDecided):
+		return emitError("already_decided", err.Error(), map[string]any{"id": prelaunchID.String()})
 	default:
 		return emitError("db", err.Error(), nil)
 	}
 }
 
-func codeForHarvestErr(err error) string {
+func codeForPrelaunchErr(err error) string {
 	switch {
 	case db.IsNotFound(err):
 		return "not_found"
-	case errors.Is(err, db.ErrHarvestAlreadyDecided):
+	case errors.Is(err, db.ErrPrelaunchAlreadyDecided):
 		return "already_decided"
 	default:
 		return "db"
 	}
 }
 
-func deriveHarvestStatus(h *db.HarvestSubmission) string {
+func derivePrelaunchStatus(h *db.PrelaunchSubmission) string {
 	switch {
 	case h.IngestedDecoy != nil:
 		return "approved"
@@ -445,15 +445,15 @@ func deriveHarvestStatus(h *db.HarvestSubmission) string {
 	}
 }
 
-func harvestsToJSON(rows []db.HarvestSubmission) []map[string]any {
+func prelaunchsToJSON(rows []db.PrelaunchSubmission) []map[string]any {
 	out := make([]map[string]any, 0, len(rows))
 	for i := range rows {
-		out = append(out, harvestToJSON(&rows[i]))
+		out = append(out, prelaunchToJSON(&rows[i]))
 	}
 	return out
 }
 
-func harvestToJSON(h *db.HarvestSubmission) map[string]any {
+func prelaunchToJSON(h *db.PrelaunchSubmission) map[string]any {
 	var userID, decoyID, rejectedAt *string
 	if h.UserID != nil {
 		s := h.UserID.String()
@@ -469,7 +469,7 @@ func harvestToJSON(h *db.HarvestSubmission) map[string]any {
 	}
 	return map[string]any{
 		"id":                h.ID.String(),
-		"status":            deriveHarvestStatus(h),
+		"status":            derivePrelaunchStatus(h),
 		"prompt_id":         h.PromptID.String(),
 		"prompt_text":       h.PromptText,
 		"text":              h.Text,

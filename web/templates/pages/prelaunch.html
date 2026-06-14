@@ -14,22 +14,22 @@
   <meta name="twitter:image" content="{{ .OGImageURL }}" />
 {{ end }}
 
-{{/* No header nav from /harvest: this is a collection surface for
+{{/* No header nav from /prelaunch: this is a collection surface for
      Reddit visitors, not a side door into the game. Leave header-meta
      empty so the base layout's right-side slot stays blank. */}}
 {{ define "header-meta" }}{{ end }}
 
 {{ define "content" }}
-  <div class="stage harvest-stage">
+  <div class="stage prelaunch-stage">
     {{ if .DeckSize }}
-      <section class="harvest-lede">
+      <section class="prelaunch-lede">
         <span class="kicker">Before we launch</span>
         <h1 class="prompt-headline">Stack the deck for the humans.</h1>
-        <p class="harvest-sub">
+        <p class="prelaunch-sub">
           Each card is a question. Type like a person.
           The most human lines go into future rounds.
         </p>
-        <p class="harvest-counter">
+        <p class="prelaunch-counter">
           <span id="counter">0</span> of <span id="total">{{ .DeckSize }}</span> added
         </p>
       </section>
@@ -66,16 +66,16 @@
         </div>
       </div>
 
-      <section class="harvest-done" id="harvestDone" hidden>
+      <section class="prelaunch-done" id="prelaunchDone" hidden>
         <span class="kicker">Done</span>
         <h2 class="prompt-headline">Added all <span id="plantedCount">0</span>.</h2>
-        <p class="harvest-sub">Thanks. Your cards stay visible above. The reviewers take it from here.</p>
+        <p class="prelaunch-sub">Thanks. Your cards stay visible above. The reviewers take it from here.</p>
       </section>
     {{ else }}
-      <section class="harvest-lede">
+      <section class="prelaunch-lede">
         <span class="kicker">Before we launch</span>
         <h1 class="prompt-headline">You've added everything we've got.</h1>
-        <p class="harvest-sub">
+        <p class="prelaunch-sub">
           Every prompt has hit its supply ceiling, or you've already answered
           them all from this device. Come back when fresh ones land.
         </p>
@@ -85,5 +85,5 @@
 {{ end }}
 
 {{ define "scripts" }}
-  <script src="{{ asset "/static/js/harvest.js" }}" defer></script>
+  <script src="{{ asset "/static/js/prelaunch.js" }}" defer></script>
 {{ end }}

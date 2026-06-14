@@ -233,7 +233,7 @@ Reviewer paper trail across content kinds.
 
 ### `pre_launch_submissions`
 
-Reddit-harvest campaign submissions. Migration 0005 made them anonymous-capable; 0006 added soft-reject.
+Reddit-prelaunch campaign submissions. Migration 0005 made them anonymous-capable; 0006 added soft-reject.
 
 | Column                | Type                       | Notes                                                |
 |-----------------------|----------------------------|------------------------------------------------------|
@@ -245,12 +245,12 @@ Reddit-harvest campaign submissions. Migration 0005 made them anonymous-capable;
 | `ingested_decoy_id`   | UUID                       | FK `→ decoy_submissions.id`; bridge into live pool   |
 | `user_id`             | UUID                       | FK `→ users.id` (SET NULL); added in 0005            |
 | `requested_ip`        | INET                       | added in 0005                                        |
-| `rejected_at`         | TIMESTAMPTZ                | nullable; soft-reject from harvest reviewer (0006)   |
+| `rejected_at`         | TIMESTAMPTZ                | nullable; soft-reject from prelaunch reviewer (0006)   |
 
 **Three terminal states (post-0006):** still-pending (`ingested_decoy_id IS NULL AND rejected_at IS NULL`), ingested (`ingested_decoy_id` set), soft-rejected (`rejected_at` set). The text + IP stay on rejected rows for spam triage instead of being destroyed by DELETE.
 
 **Unique partial index:** `(user_id, prompt_id) WHERE user_id IS NOT NULL` — one per device per prompt.
-**Plain index:** `(prompt_id)` for the harvest-deck counter.
+**Plain index:** `(prompt_id)` for the prelaunch-deck counter.
 **Partial index (0006):** `(prompt_id) WHERE rejected_at IS NULL` — keeps the under-supplied counter cheap as the rejected pile grows.
 
 **Example rows:**
@@ -712,7 +712,7 @@ daily_collective_stats  → daily_puzzles  (natural key on puzzle_number; no FK,
 | `streaks.last_played_puzzle_number`  | `daily_puzzles.puzzle_number` (natural key, not id)       | The display number, not the surrogate UUID, is what gates streak advance. |
 | `daily_collective_stats.puzzle_number` | `daily_puzzles.puzzle_number` (natural key, not id)     | Same reasoning as `streaks` — the display number is the join key; soft-deleting a puzzle row is not a workflow we support. |
 | `puzzle_round_answers.answer_text`   | denormalized snapshot of bot/decoy text                   | Historical puzzles must stay stable if the source row is retired or soft-deleted. |
-| `pre_launch_submissions.ingested_decoy_id` | optional FK — null until the harvested row is promoted into the live pool | Two-stage ingest. |
+| `pre_launch_submissions.ingested_decoy_id` | optional FK — null until the prelaunched row is promoted into the live pool | Two-stage ingest. |
 
 ## Indexes worth knowing for query cost
 

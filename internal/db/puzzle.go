@@ -645,7 +645,7 @@ func (d *DB) DeletePrompt(ctx context.Context, id uuid.UUID) error {
 
 // PromptSupplyRollup is the per-prompt content-readiness snapshot used by the
 // `bbg-admin prompt supply` verb. ApprovedBots / ApprovedDecoys count live
-// rows in the moderated pool; PendingDecoys counts un-decided harvest rows;
+// rows in the moderated pool; PendingDecoys counts un-decided prelaunch rows;
 // UsedInPuzzles lists every puzzle_number the prompt currently appears in.
 type PromptSupplyRollup struct {
 	PromptID       uuid.UUID

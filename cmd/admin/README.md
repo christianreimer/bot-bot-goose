@@ -25,8 +25,8 @@ bbg-admin puzzle  <list|show|create|compose|edit|set-round|set-answer|delete|sch
 bbg-admin decoy   <list|show|review|bulk-review>
 bbg-admin bot     <list|show|review|bulk-review>
 bbg-admin prompt  <list|show|create|edit|retire|delete>
-bbg-admin harvest <list|show|review|bulk-review|prompts>
-bbg-admin stats   <overview|players|decoys|harvest>
+bbg-admin prelaunch <list|show|review|bulk-review|prompts>
+bbg-admin stats   <overview|players|decoys|prelaunch>
 ```
 
 Pre-existing one-shots (unchanged): `seed`, `promote`, `vapid-gen`, `import`,
@@ -153,7 +153,7 @@ Codes the agent should recognize:
 | `insufficient_content`  | Not enough approved bots/decoys for the prompt to compose a round.                     |
 | `referenced`            | Prompt is referenced by puzzle_rounds; use `prompt retire` instead.                    |
 | `limit_exceeded`        | Bulk operation matched more rows than `--limit`. Raise `--limit` explicitly to proceed.|
-| `already_decided`       | Harvest submission already ingested or rejected — pick a different id.                 |
+| `already_decided`       | Prelaunch submission already ingested or rejected — pick a different id.                 |
 | `db`                    | Unexpected database error. Inspect `error` field.                                      |
 
 ## Safety rails
@@ -173,7 +173,7 @@ Codes the agent should recognize:
 - `decoy bulk-review` caps the number of rows at `--limit` (default 100) and
   refuses with `limit_exceeded` if the filter matches more — the agent must
   re-issue with an explicit higher `--limit` to confirm.
-- `harvest review` and `harvest bulk-review` require `--reviewer-email` (or
+- `prelaunch review` and `prelaunch bulk-review` require `--reviewer-email` (or
   `BBG_REVIEWER_EMAIL`); the email must already be a registered user. Approve
   ingests the row into `decoy_submissions` (status='approved') in one
   transaction with `moderation_reviews` + `audit_log`. Reject soft-marks via

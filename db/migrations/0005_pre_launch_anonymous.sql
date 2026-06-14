@@ -3,7 +3,7 @@
 
 -- pre_launch_submissions was designed in 0001 for the original "give us your
 -- email so we can email you when your answer goes live" campaign shape.
--- The Reddit harvest variant is anonymous — no email, no sign-in — so:
+-- The Reddit prelaunch variant is anonymous — no email, no sign-in — so:
 --
 --   1. email is no longer required
 --   2. we track the anonymous device-cookie user_id instead, so a returning
@@ -23,7 +23,7 @@ CREATE UNIQUE INDEX pre_launch_unique_per_user_prompt
     ON pre_launch_submissions (user_id, prompt_id)
     WHERE user_id IS NOT NULL;
 
--- Helps the HarvestDeck picker's count CTE.
+-- Helps the PrelaunchDeck picker's count CTE.
 CREATE INDEX pre_launch_prompt_idx ON pre_launch_submissions (prompt_id);
 
 -- +goose StatementEnd

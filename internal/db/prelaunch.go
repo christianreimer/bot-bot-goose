@@ -9,20 +9,20 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// HarvestPrompt is one card in the deck served by GET /harvest. Just id + text.
-type HarvestPrompt struct {
+// PrelaunchPrompt is one card in the deck served by GET /prelaunch. Just id + text.
+type PrelaunchPrompt struct {
 	ID   uuid.UUID
 	Text string
 }
 
-// HarvestEligiblePool returns every prompt that's not retired AND has fewer
+// PrelaunchEligiblePool returns every prompt that's not retired AND has fewer
 // than 5 live (non-rejected) rows in pre_launch_submissions. Unfiltered by
 // user — that filter happens in Go after a cache lookup, see plan §2.7.
 //
 // The list is small enough (~hundreds at v1) that returning it whole and
 // sampling client-side beats running the random+limit in SQL on every
-// harvest request.
-func (d *DB) HarvestEligiblePool(ctx context.Context) ([]HarvestPrompt, error) {
+// prelaunch request.
+func (d *DB) PrelaunchEligiblePool(ctx context.Context) ([]PrelaunchPrompt, error) {
 	const q = `
 		WITH counts AS (
 		    SELECT prompt_id, count(*) AS n
@@ -41,9 +41,9 @@ func (d *DB) HarvestEligiblePool(ctx context.Context) ([]HarvestPrompt, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []HarvestPrompt
+	var out []PrelaunchPrompt
 	for rows.Next() {
-		var p HarvestPrompt
+		var p PrelaunchPrompt
 		if err := rows.Scan(&p.ID, &p.Text); err != nil {
 			return nil, err
 		}
@@ -52,11 +52,11 @@ func (d *DB) HarvestEligiblePool(ctx context.Context) ([]HarvestPrompt, error) {
 	return out, rows.Err()
 }
 
-// HarvestSubmittedPromptIDs returns the prompt IDs this user has already
+// PrelaunchSubmittedPromptIDs returns the prompt IDs this user has already
 // submitted for (including rejected rows — a rejected row still counts as
 // "this device already answered"). Cheap, indexed scan; cached at the
 // caller as a small map.
-func (d *DB) HarvestSubmittedPromptIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+func (d *DB) PrelaunchSubmittedPromptIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
 	const q = `SELECT prompt_id FROM pre_launch_submissions WHERE user_id = $1`
 	rows, err := d.Query(ctx, q, userID)
 	if err != nil {
@@ -74,12 +74,12 @@ func (d *DB) HarvestSubmittedPromptIDs(ctx context.Context, userID uuid.UUID) ([
 	return out, rows.Err()
 }
 
-// InsertHarvestSubmission writes a row in pre_launch_submissions for the
+// InsertPrelaunchSubmission writes a row in pre_launch_submissions for the
 // anonymous device. email stays NULL (Reddit traffic doesn't carry one),
 // ingested_decoy_id stays NULL (auto-promotion is intentionally forbidden).
-// Returns ErrHarvestAlreadySubmitted on the partial-unique-index violation
+// Returns ErrPrelaunchAlreadySubmitted on the partial-unique-index violation
 // so the handler can map cleanly to a 409 {code: "already_submitted"}.
-func (d *DB) InsertHarvestSubmission(ctx context.Context, userID, promptID uuid.UUID, text, requestedIP string) (uuid.UUID, error) {
+func (d *DB) InsertPrelaunchSubmission(ctx context.Context, userID, promptID uuid.UUID, text, requestedIP string) (uuid.UUID, error) {
 	var inet any
 	if addr, err := netip.ParseAddr(requestedIP); err == nil {
 		inet = addr.String()
@@ -91,16 +91,16 @@ func (d *DB) InsertHarvestSubmission(ctx context.Context, userID, promptID uuid.
 		RETURNING id
 	`, promptID, userID, text, inet).Scan(&id)
 	if err != nil && isUniqueViolation(err) {
-		return uuid.Nil, ErrHarvestAlreadySubmitted
+		return uuid.Nil, ErrPrelaunchAlreadySubmitted
 	}
 	return id, err
 }
 
-// HarvestSubmissionForUserAndPrompt is the symmetric counterpart of
+// PrelaunchSubmissionForUserAndPrompt is the symmetric counterpart of
 // DecoyForUserAndPrompt — used by the handler's TOCTOU recheck after an
 // insert race so the user gets a clean "already_submitted" response rather
 // than a raw pg error.
-func (d *DB) HarvestSubmissionForUserAndPrompt(ctx context.Context, userID, promptID uuid.UUID) (uuid.UUID, error) {
+func (d *DB) PrelaunchSubmissionForUserAndPrompt(ctx context.Context, userID, promptID uuid.UUID) (uuid.UUID, error) {
 	var id uuid.UUID
 	err := d.QueryRow(ctx, `
 		SELECT id FROM pre_launch_submissions
@@ -116,6 +116,6 @@ func (d *DB) HarvestSubmissionForUserAndPrompt(ctx context.Context, userID, prom
 	return id, nil
 }
 
-// ErrHarvestAlreadySubmitted is the sentinel for "this device already
+// ErrPrelaunchAlreadySubmitted is the sentinel for "this device already
 // submitted for this prompt." Maps to the 409 already_submitted code.
-var ErrHarvestAlreadySubmitted = errors.New("harvest submission already exists for this user+prompt")
+var ErrPrelaunchAlreadySubmitted = errors.New("prelaunch submission already exists for this user+prompt")

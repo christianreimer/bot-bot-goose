@@ -14,8 +14,8 @@
 //	bbg-admin decoy   <list|show|review|bulk-review>
 //	bbg-admin bot     <list|show|review|bulk-review>
 //	bbg-admin prompt  <list|show|create|edit|retire|delete|supply>
-//	bbg-admin harvest <list|show|review|bulk-review|prompts>
-//	bbg-admin stats   <overview|players|decoys|harvest>
+//	bbg-admin prelaunch <list|show|review|bulk-review|prompts>
+//	bbg-admin stats   <overview|players|decoys|prelaunch>
 //
 // See cmd/admin/README.md for the JSON shapes and the DigitalOcean connection
 // recipe.
@@ -61,8 +61,8 @@ func main() {
 		mustRun(log, runDecoy)
 	case "prompt":
 		mustRun(log, runPrompt)
-	case "harvest":
-		mustRun(log, runHarvest)
+	case "prelaunch":
+		mustRun(log, runPrelaunch)
 	case "bot":
 		mustRun(log, runBot)
 	case "stats":
@@ -86,8 +86,8 @@ func usage() {
   decoy      Manage user-submitted answers (list/show/review/bulk-review).
   bot        Manage LLM-generated bot candidates (list/show/review/bulk-review).
   prompt     Manage prompts (list/show/create/edit/retire/delete/supply).
-  harvest    Review /harvest submissions in pre_launch_submissions (list/show/review/bulk-review/prompts).
-  stats      Usage reporting (overview/players/decoys/harvest).
+  prelaunch    Review /prelaunch submissions in pre_launch_submissions (list/show/review/bulk-review/prompts).
+  stats      Usage reporting (overview/players/decoys/prelaunch).
 
 See cmd/admin/README.md for JSON output shapes and the DigitalOcean connection recipe.`)
 }

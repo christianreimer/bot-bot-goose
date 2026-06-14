@@ -124,8 +124,8 @@ func (c *Cache) Get(ctx context.Context, ns, key string) ([]byte, bool) {
 }
 
 // Set writes the bytes at `key` with the given TTL. A zero ttl is a
-// permanent set; the launch-capacity plan uses that for og:harvest:v1
-// only. Errors are swallowed (the next read just misses).
+// permanent set (no expiry); every other caller passes a positive TTL.
+// Errors are swallowed (the next read just misses).
 func (c *Cache) Set(ctx context.Context, ns, key string, val []byte, ttl time.Duration) {
 	if !c.Enabled() {
 		return

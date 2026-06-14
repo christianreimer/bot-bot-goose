@@ -319,44 +319,44 @@ footer small{color:var(--muted);font-family:var(--mono);font-size:11px;}
   flex:1;text-align:center;text-decoration:none;display:block;
 }
 
-/* ---- /harvest (Phase-0 collection deck) ----
+/* ---- /prelaunch (Phase-0 collection deck) ----
    Layout: fixed 3-column × 7-row grid of face-down cards (21 total) on
    every viewport — phones and desktops alike. The narrow column matches
    the rest of the app's 520px max-width feel, and a constant column
    count means the rendered grid looks the same on a poster screenshot
    regardless of device. Tapping a card opens a centered overlay above
    the grid; the grid doesn't reflow. */
-.harvest-stage{align-items:stretch;}
-.harvest-lede,
-.harvest-done{
+.prelaunch-stage{align-items:stretch;}
+.prelaunch-lede,
+.prelaunch-done{
   background:var(--surface);border:1px solid var(--line);border-radius:16px;
   padding:22px 22px 18px;margin-top:14px;
 }
-.harvest-sub{font-size:14px;line-height:1.45;color:var(--ink);margin:10px 0 6px;}
-.harvest-counter{
+.prelaunch-sub{font-size:14px;line-height:1.45;color:var(--ink);margin:10px 0 6px;}
+.prelaunch-counter{
   font-family:var(--mono);font-size:11px;letter-spacing:.14em;
   text-transform:uppercase;color:var(--muted);
   margin:14px 0 0;
 }
-.harvest-counter #counter{color:var(--honk);font-weight:700;}
+.prelaunch-counter #counter{color:var(--honk);font-weight:700;}
 
 .card-grid{
   display:grid;
   grid-template-columns:repeat(3, 1fr);
   gap:10px;margin-top:18px;
-  counter-reset:harvestCard;
+  counter-reset:prelaunchCard;
 }
 
 /* Each card. counter-increment paints "01", "02"… into .card-num via CSS. */
-.harvest-stage .card{
+.prelaunch-stage .card{
   position:relative;background:var(--surface);
   border:1px solid var(--line);border-radius:13px;padding:0;
-  counter-increment:harvestCard;
+  counter-increment:prelaunchCard;
   transition:opacity 250ms cubic-bezier(0.22, 1, 0.36, 1),
              transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
              background 200ms ease;
 }
-.harvest-stage .card:hover{background:var(--surface-2);}
+.prelaunch-stage .card:hover{background:var(--surface-2);}
 
 .card-face{
   display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -374,7 +374,7 @@ footer small{color:var(--muted);font-family:var(--mono);font-size:11px;}
 /* "Active" — the source card while the overlay is open. Subtle honk
    accent on the still-face-down card so the user knows which one
    they're working on. The grid is otherwise untouched. */
-.harvest-stage .card.active{
+.prelaunch-stage .card.active{
   border-color:rgba(244,162,59,.30);
   background:rgba(244,162,59,.04);
 }
@@ -488,13 +488,13 @@ footer small{color:var(--muted);font-family:var(--mono);font-size:11px;}
 
    Reed-tinted border marks the card done; the existence of writing
    where the feather used to be is itself the "filled in" signal. */
-.harvest-stage .card.planted{
+.prelaunch-stage .card.planted{
   background:rgba(111,179,106,.05);
   border-color:rgba(111,179,106,.30);
   cursor:default;
 }
-.harvest-stage .card.planted:hover{background:rgba(111,179,106,.05);}
-.harvest-stage .card.planted .card-face{
+.prelaunch-stage .card.planted:hover{background:rgba(111,179,106,.05);}
+.prelaunch-stage .card.planted .card-face{
   /* Anchor the writing top-left like real text in a column, not centered
      like the face-down feather. Generous padding so short answers still
      have room to breathe. */
@@ -514,7 +514,7 @@ footer small{color:var(--muted);font-family:var(--mono);font-size:11px;}
 }
 
 @media (prefers-reduced-motion: reduce){
-  .harvest-stage .card{transition:none;}
+  .prelaunch-stage .card{transition:none;}
 }
 
 /* ---- result-page sign-in nudge ---- */

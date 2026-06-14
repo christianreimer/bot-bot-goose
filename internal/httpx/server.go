@@ -186,7 +186,7 @@ func (s *Server) routes() {
 	r.Get("/d/{short}/og.png", s.handleDecoyShareOG)
 	r.Get("/r/{short}", s.handleResultShare)
 	r.Get("/r/{short}/og.png", s.handleResultShareOG)
-	r.Get("/harvest/og.png", s.handleHarvestOG)
+	r.Get("/prelaunch/og.png", s.handlePrelaunchOG)
 
 	// Themed 404 for any path that doesn't match a route above or below.
 	// Outside the session-middleware group too: minting a cookie just
@@ -218,12 +218,12 @@ func (s *Server) routes() {
 		r.Get("/leaderboard/originals", s.handleLeaderboardOriginals)
 		r.Get("/leaderboard/spotters", s.handleLeaderboardSpotters)
 
-		// Phase-0 harvest campaign. The deck filters by user ID so this one
-		// stays behind the session middleware (unlike /harvest/og.png, which
+		// Phase-0 prelaunch campaign. The deck filters by user ID so this one
+		// stays behind the session middleware (unlike /prelaunch/og.png, which
 		// is mounted above). Submissions land in pre_launch_submissions and
-		// do NOT auto-flow into the live game. See plans/harvest.
-		r.Get("/harvest", s.handleHarvest)
-		r.Post("/api/harvest/submit", s.handleHarvestSubmit)
+		// do NOT auto-flow into the live game. See plans/prelaunch.
+		r.Get("/prelaunch", s.handlePrelaunch)
+		r.Post("/api/prelaunch/submit", s.handlePrelaunchSubmit)
 
 		// Magic-link sign-in. The GET is the email-tap path; the POST is
 		// the form that mails the link. Both run behind the session

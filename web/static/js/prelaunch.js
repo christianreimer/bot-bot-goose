@@ -1,8 +1,8 @@
-// /harvest — Phase-0 collection-campaign deck.
+// /prelaunch — Phase-0 collection-campaign deck.
 //
 // 21 face-down cards in a fixed 3×7 grid. Tapping a card opens a centered overlay
 // "on top of" the grid (the grid does NOT move; the original card stays
-// in place, dimly highlighted). On Plant ▸ we POST to /api/harvest/submit
+// in place, dimly highlighted). On Plant ▸ we POST to /api/prelaunch/submit
 // (writes to pre_launch_submissions, NEVER decoy_submissions). The
 // overlay closes; the original card stays in its grid slot with the
 // user's answer rendered in place of the feather.
@@ -12,7 +12,7 @@
   const grid = document.getElementById('cardGrid');
   const counterEl = document.getElementById('counter');
   const totalEl = document.getElementById('total');
-  const done = document.getElementById('harvestDone');
+  const done = document.getElementById('prelaunchDone');
   const plantedCount = document.getElementById('plantedCount');
   const overlay = document.getElementById('cardOverlay');
   const overlayScrim = document.getElementById('overlayScrim');
@@ -56,7 +56,7 @@
     const promptID = activeCard.dataset.promptId;
     let r, body = {};
     try {
-      r = await fetch('/api/harvest/submit', {
+      r = await fetch('/api/prelaunch/submit', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
