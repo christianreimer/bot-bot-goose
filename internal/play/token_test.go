@@ -2,6 +2,7 @@ package play
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,13 +36,27 @@ func TestIssueVerifyRoundtrip(t *testing.T) {
 
 func TestVerifyRejectsTamperedSig(t *testing.T) {
 	secret := []byte("super-secret-secret-secret-32bts")
-	playID := uuid.New()
+	// Use a fixed UUID so the test is deterministic — the bit-tampering
+	// arithmetic below targets the FIRST char of the signature, which
+	// always encodes data bits (the LAST char of a 32-byte sig in
+	// RawURL base64 carries 4 data bits + 2 padding bits, so flipping
+	// it lands on padding ~50% of the time and Verify decodes the same
+	// underlying signature). With a fixed UUID the choice of sig char
+	// stops mattering, but tampering the first one is the robust
+	// shape regardless.
+	playID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	perm := []int16{0, 1, 2, 3}
 	now := time.Unix(1_700_000_000, 0)
 
 	tok := Issue(secret, playID, 0, perm, now)
-	// Flip the last char of the signature.
-	tampered := tok[:len(tok)-1] + string([]byte{tok[len(tok)-1] ^ 1})
+	// Flip a bit in the FIRST char of the signature (right after the
+	// last `.`). This char always encodes data bits, never base64
+	// padding, so the decoded HMAC always changes.
+	dot := strings.LastIndex(tok, ".")
+	if dot < 0 || dot+1 >= len(tok) {
+		t.Fatalf("token has no signature segment: %q", tok)
+	}
+	tampered := tok[:dot+1] + string([]byte{tok[dot+1] ^ 1}) + tok[dot+2:]
 	if _, err := Verify(secret, tampered, now); err == nil {
 		t.Fatal("verify accepted tampered token")
 	}

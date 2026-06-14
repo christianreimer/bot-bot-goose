@@ -75,7 +75,15 @@ func Verify(secret []byte, raw string, now time.Time) (*Token, error) {
 	}
 	payload := strings.Join(parts[:4], ".")
 	want := sign(secret, payload)
-	got, err := base64.RawURLEncoding.DecodeString(parts[4])
+	// .Strict() enforces that the (4-bit) data quanta in the last base64
+	// char have their two unused low bits set to zero. Without Strict the
+	// decoder accepts non-canonical encodings — including ones produced by
+	// flipping those padding bits — and Verify would mistakenly accept a
+	// "tampered" token whose decoded HMAC happens to match. Belt-and-
+	// suspenders: the HMAC equality check would still catch a real forgery,
+	// but rejecting non-canonical encodings up front means there's a single
+	// canonical wire shape for a given signature.
+	got, err := base64.RawURLEncoding.Strict().DecodeString(parts[4])
 	if err != nil {
 		return nil, errors.New("token: bad sig encoding")
 	}
