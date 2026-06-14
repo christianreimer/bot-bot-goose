@@ -16,21 +16,24 @@ COMPOSE := docker compose -f deploy/docker-compose.yml --env-file deploy/compose
 
 .PHONY: up up-prod down rebuild logs logs-prod ps
 
-# Local-testing stack: bbg + postgres only. Traffic comes in via the
-# Cloudflare Tunnel daemon pointed straight at 127.0.0.1:8080 (Caddy
-# would just be a dead branch trying to provision certs).
+# Local-testing stack: bbg + bundled postgres + bundled valkey. Traffic
+# comes in via the Cloudflare Tunnel daemon pointed straight at
+# 127.0.0.1:8080 (Caddy would just be a dead branch trying to provision
+# certs locally, so it's reserved for `up-prod`). The `local` profile
+# opts postgres and valkey into the compose lifecycle.
 up:
-	$(COMPOSE) up -d
+	$(COMPOSE) --profile local up -d
 
-# Production stack (DigitalOcean droplet): adds Caddy as the TLS edge.
-# `--profile edge` opts the caddy service into the lifecycle.
+# Production stack (DigitalOcean droplet): bbg + Caddy as the TLS edge.
+# Postgres + Valkey are NOT bundled — the bbg container talks to DO
+# Managed Postgres and DO Managed Caching via BBG_DB_URL / BBG_VALKEY_URL
+# set in compose.env. See plans/launch-capacity.md §5.2 + §5.3.
 up-prod:
 	$(COMPOSE) --profile edge up -d
 
-# `--profile edge` makes sure any running caddy container is stopped too.
-# Without the flag, profile-gated services would be left up.
+# Bring down everything regardless of which profile started it.
 down:
-	$(COMPOSE) --profile edge down
+	$(COMPOSE) --profile local --profile edge down
 
 # Rebuilds the bbg image and recreates only its container; works under
 # either `up` mode because the bbg service is profile-less.

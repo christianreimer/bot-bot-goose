@@ -1,13 +1,19 @@
 services:
+  # Local bundled Postgres. `local` profile only — production uses DO
+  # Managed Postgres and the bbg container talks to it via BBG_DB_URL.
+  # See plans/launch-capacity.md §5.2.
   postgres:
+    profiles: [local]
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-bbg}
-      # No default value: docker compose refuses to start until this is set,
-      # so a forgotten compose.env can never silently boot a postgres with a
-      # well-known password. See deploy/compose.env.example for a generator.
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required — generate one with `openssl rand -hex 24`}
+      # Pass-through, no default. The postgres image refuses to start with
+      # an empty POSTGRES_PASSWORD, so the safety net (no silent bbg/bbg
+      # boot) is enforced by postgres itself at container start rather than
+      # by compose interpolation — which lets the `edge` profile run without
+      # needing a placeholder password in compose.env.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-bbg}
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -19,17 +25,46 @@ services:
       timeout: 3s
       retries: 10
 
+  # Local bundled Valkey. `local` profile only — production uses DO
+  # Managed Caching (Valkey) and bbg talks to it via BBG_VALKEY_URL. The
+  # container is unauthenticated and loopback-only, which is fine for dev;
+  # the managed instance enforces TLS + password via rediss:// in its URI.
+  # See plans/launch-capacity.md §5.3.
+  valkey:
+    profiles: [local]
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   bbg:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
     restart: unless-stopped
+    # required: false lets bbg start in `edge`-only (prod) mode where
+    # neither postgres nor valkey are part of the compose lifecycle —
+    # the operator points BBG_DB_URL / BBG_VALKEY_URL at the DO managed
+    # instances and the local services stay quiet.
     depends_on:
       postgres:
         condition: service_healthy
+        required: false
+      valkey:
+        condition: service_healthy
+        required: false
     environment:
       BBG_LISTEN: ":8080"
-      BBG_DB_URL: "postgres://${POSTGRES_USER:-bbg}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-bbg}?sslmode=disable"
+      # Prod operators override BBG_DB_URL via compose.env to the managed
+      # cluster's pooler URI; the fallback below is the loopback URL the
+      # local-profile postgres container uses.
+      BBG_DB_URL: "${BBG_DB_URL:-postgres://${POSTGRES_USER:-bbg}:${POSTGRES_PASSWORD:-bbg}@postgres:5432/${POSTGRES_DB:-bbg}?sslmode=disable}"
       BBG_SESSION_KEY: ${BBG_SESSION_KEY:?BBG_SESSION_KEY required — generate 32+ random bytes hex}
       BBG_BASE_URL: ${BBG_BASE_URL:-https://botbotgoose.fun}
       BBG_VAPID_PUBLIC: ${BBG_VAPID_PUBLIC:-}
@@ -41,6 +76,18 @@ services:
       BBG_EMAIL_PROVIDER: ${BBG_EMAIL_PROVIDER:-log}
       BBG_RESEND_API_KEY: ${BBG_RESEND_API_KEY:-}
       BBG_EMAIL_FROM: ${BBG_EMAIL_FROM:-Bot Bot Goose <noreply@localhost>}
+      # Valkey/Redis cache. Default points at the local-profile container.
+      # Prod operator overrides via compose.env (rediss:// URI from DO
+      # Managed Caching). Empty disables the cache layer entirely — every
+      # read goes to Postgres.
+      BBG_VALKEY_URL: ${BBG_VALKEY_URL:-redis://valkey:6379/0}
+      # Pool sizing — defaults in code (64/8) are usually correct; only
+      # override here when the managed-Postgres plan has a lower ceiling.
+      BBG_DB_MAX_CONNS: ${BBG_DB_MAX_CONNS:-}
+      BBG_DB_MIN_CONNS: ${BBG_DB_MIN_CONNS:-}
+      # Optional private metrics listener (loopback inside the container).
+      # The container's /metrics is NOT proxied through Caddy/Cloudflare.
+      BBG_METRICS_LISTEN: ${BBG_METRICS_LISTEN:-}
       # BBG_DEV=1 keeps cookies non-Secure so they survive plain HTTP from
       # curl smoke tests. Leave unset in production behind a TLS-terminating
       # proxy (Caddy or the Cloudflare Tunnel edge).
