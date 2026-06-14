@@ -173,6 +173,15 @@ func (s *Server) handleMagicConsume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The session cache (plan §2.3) is keyed by cookie hash and currently
+	// holds the pre-sign-in user blob — the anonymous identity for a
+	// promotion, or the now-deleted current user for a merge. Drop it so
+	// the redirect's next request hits Postgres and sees the signed-in
+	// identity immediately, not after the TTL expires.
+	if hash := users.CurrentDeviceCookieHash(r, s.cfg.SessionKey); hash != nil {
+		users.InvalidateCookieHash(ctx, s.cfg.Cache, hash)
+	}
+
 	http.Redirect(w, r, "/me?signed_in=1", http.StatusSeeOther)
 }
 
