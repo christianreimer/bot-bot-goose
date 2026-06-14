@@ -115,61 +115,19 @@ services:
       #   value: "4"
 
 # ---- scheduled jobs ----------------------------------------------------------
-# DO App Platform supports cron jobs via the same Dockerfile-built image
-# under a different run_command. The bbg image ships every CLI binary,
-# so no second image to maintain.
-
-jobs:
-  # Composes the next daily puzzle. The full deck pipeline (prompts +
-  # bot candidates + decoys) must already be moderated and ready in
-  # Postgres; this job just stitches them into the day's row.
-  - name: puzzle-build
-    kind: CRON
-    schedule: "0 12 * * *"   # 12:00 UTC daily — bake tomorrow's puzzle
-    dockerfile_path: deploy/Dockerfile
-    source_dir: /
-    run_command: bbg-puzzle-build
-    instance_size_slug: basic-xxs
-    envs:
-      - key: BBG_DB_URL
-        scope: RUN_TIME
-        type: SECRET
-        value: REPLACE_ME
-
-  # Late-night alarm: exits 1 if tomorrow's puzzle wasn't built. Pair
-  # this with DO Monitoring → "job failed" alert so the alarm reaches
-  # you on time.
-  - name: puzzle-check
-    kind: CRON
-    schedule: "0 22 * * *"   # 22:00 UTC daily
-    dockerfile_path: deploy/Dockerfile
-    source_dir: /
-    run_command: bbg-puzzle-build --check
-    instance_size_slug: basic-xxs
-    envs:
-      - key: BBG_DB_URL
-        scope: RUN_TIME
-        type: SECRET
-        value: REPLACE_ME
-
-  # Rebuilds the Originals leaderboard + freezes yesterday's collective
-  # catch rate. Cheap, run nightly.
-  - name: rollup
-    kind: CRON
-    schedule: "30 1 * * *"   # 01:30 UTC — well after midnight, before the
-                             # daily share unfurl traffic builds.
-    dockerfile_path: deploy/Dockerfile
-    source_dir: /
-    run_command: bbg-admin rollup
-    instance_size_slug: basic-xxs
-    envs:
-      - key: BBG_DB_URL
-        scope: RUN_TIME
-        type: SECRET
-        value: REPLACE_ME
-      # Rollup invalidates the cached "Latest collective stat" key on
-      # write so the next read sees the new puzzle's number immediately.
-      - key: BBG_VALKEY_URL
-        scope: RUN_TIME
-        type: SECRET
-        value: REPLACE_ME
+# NOT in this spec: DO App Platform's `jobs` component only supports
+# kind: PRE_DEPLOY / POST_DEPLOY / FAILED_DEPLOY — there is no native
+# cron scheduling. The daily beats (12:00 UTC puzzle-build, 22:00 UTC
+# alarm, 01:30 UTC rollup) must be driven externally, e.g. by:
+#
+#   - GitHub Actions cron workflows that `doctl apps exec ...` the
+#     right bbg-* binary inside the running App,
+#   - a separate DO Function with a cron trigger that hits a signed
+#     webhook on bbg,
+#   - an external cron-as-a-service (Cronhub, EasyCron) hitting the
+#     same webhook.
+#
+# Until one of those is wired up, the operator runs `bbg-puzzle-build`
+# and `bbg-admin rollup` by hand via `doctl apps exec` on the schedule
+# above. The container image already ships every CLI binary the cron
+# needs, so no second image to maintain.
