@@ -64,7 +64,9 @@ func puzzleUsage() {
   set-answer Override one answer's text snapshot (slot 0..3).
   delete     Delete an unplayed puzzle.
   replace    DESTRUCTIVE: delete a puzzle (incl. its plays) and re-import from JSON. Requires --content + --confirm-plays.
-  schedule   Loop `+"`compose`"+` for N consecutive days, skipping existing dates.`)
+  schedule   Loop `+"`compose`"+` for N consecutive days, skipping existing dates.
+             --check is a no-write report: lists per-day coverage for the window
+             and exits non-zero with code "gaps" when any date is missing.`)
 }
 
 // --- list --------------------------------------------------------------------
@@ -841,13 +843,23 @@ func puzzleDelete(ctx context.Context, log *slog.Logger) error {
 func puzzleSchedule(ctx context.Context, log *slog.Logger) error {
 	fs := flag.NewFlagSet("puzzle schedule", flag.ExitOnError)
 	dbf := registerDBFlags(fs)
-	startStr := fs.String("start", "", "YYYY-MM-DD (required)")
-	days := fs.Int("days", 7, "number of consecutive days to schedule")
+	startStr := fs.String("start", "", "YYYY-MM-DD (defaults to tomorrow when --check is set)")
+	days := fs.Int("days", 7, "number of consecutive days to consider")
+	check := fs.Bool("check", false, "report-only: don't compose, just list coverage for the window. Exits non-zero on any gap.")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
 	}
+
+	// --check defaults --start to tomorrow UTC so the common Hermes / cron
+	// invocation is just `bbg-admin puzzle schedule --check`. The compose
+	// variant still requires an explicit start so a typo can't silently
+	// schedule a year out.
 	if *startStr == "" {
-		return emitError("invalid", "--start is required", nil)
+		if *check {
+			*startStr = time.Now().UTC().AddDate(0, 0, 1).Format("2006-01-02")
+		} else {
+			return emitError("invalid", "--start is required (unless --check is set)", nil)
+		}
 	}
 	start, err := time.Parse("2006-01-02", *startStr)
 	if err != nil {
@@ -861,6 +873,10 @@ func puzzleSchedule(ctx context.Context, log *slog.Logger) error {
 		return err
 	}
 	defer d.Close()
+
+	if *check {
+		return puzzleScheduleCheck(ctx, d, start, *days)
+	}
 
 	type result struct {
 		Date         string `json:"date"`
@@ -894,6 +910,54 @@ func puzzleSchedule(ctx context.Context, log *slog.Logger) error {
 		})
 	}
 	return emitJSON(map[string]any{"scheduled": results})
+}
+
+// puzzleScheduleCheck reports per-day coverage for the window without writing
+// anything. Designed for cron / Hermes: exits 0 only when every day in the
+// window has a puzzle, otherwise exits 1 (via the standard error envelope
+// + errorEmitted sentinel) so an agent can branch on `code: "gaps"`.
+//
+// Output shape (stdout, JSON):
+//
+//	{
+//	  "start": "2026-06-15", "days": 7,
+//	  "covered": [{"date":"2026-06-15","puzzle_number":42}, ...],
+//	  "missing": ["2026-06-18", "2026-06-19"],
+//	  "gaps":    2
+//	}
+func puzzleScheduleCheck(ctx context.Context, d *db.DB, start time.Time, days int) error {
+	type coveredDay struct {
+		Date         string `json:"date"`
+		PuzzleNumber int32  `json:"puzzle_number"`
+	}
+	var covered []coveredDay
+	var missing []string
+
+	for i := 0; i < days; i++ {
+		date := start.AddDate(0, 0, i)
+		ds := date.Format("2006-01-02")
+		p, err := d.PuzzleByDate(ctx, date)
+		if err == nil {
+			covered = append(covered, coveredDay{Date: ds, PuzzleNumber: p.PuzzleNumber})
+			continue
+		}
+		if !db.IsNotFound(err) {
+			return emitError("db", "lookup "+ds+": "+err.Error(), nil)
+		}
+		missing = append(missing, ds)
+	}
+
+	payload := map[string]any{
+		"start":   start.Format("2006-01-02"),
+		"days":    days,
+		"covered": covered,
+		"missing": missing,
+		"gaps":    len(missing),
+	}
+	if len(missing) > 0 {
+		return emitError("gaps", fmt.Sprintf("%d of %d days missing", len(missing), days), payload)
+	}
+	return emitJSON(payload)
 }
 
 // composeOne is the schedule-loop's per-day composer. It does not write the
