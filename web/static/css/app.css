@@ -714,4 +714,50 @@ a.puzzle-no:hover{color:var(--ink);}
   font-family:var(--body);font-size:13px;color:var(--ink);text-align:right;
 }
 
+/* ---- /  in BBG_PRELAUNCH_MODE (coming-soon poster) -----------------------
+   The placeholder shown at "/" and at any URL that isn't /prelaunch,
+   /privacy, /healthz, or /static during the pre-launch campaign. Anyone
+   who pokes around after seeing the campaign link should still feel
+   they're on a finished site, just one that hasn't opened the doors yet.
+   Layout is a vertically-centered single column with the brand kicker,
+   a two-line display headline, a one-sentence pitch, the primary CTA
+   that points back at /prelaunch, and a quiet "we launch when the deck
+   is full" coda. The fade-in on the headline plays once on load. */
+.coming-soon{
+  flex:1; display:flex; align-items:center; justify-content:center;
+  min-height:60vh;
+}
+.coming-soon-lede{
+  text-align:center;
+  padding:32px 8px;
+  display:flex; flex-direction:column; align-items:center; gap:14px;
+  max-width:440px; margin:0 auto;
+  animation:comingSoonFade .6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.coming-soon-headline{
+  font-size:32px; line-height:1.1; letter-spacing:-.03em;
+  margin:6px 0 4px;
+}
+.coming-soon-headline .honk{color:var(--honk);}
+.coming-soon-sub{
+  font-family:var(--body); font-size:15px; line-height:1.5; color:var(--ink);
+  max-width:340px; margin:0;
+}
+.coming-soon-cta{
+  display:inline-flex; align-items:center; justify-content:center;
+  text-decoration:none;
+  margin-top:10px;
+  padding:14px 28px;
+}
+.coming-soon-meta{
+  font-family:var(--mono); font-size:11px; font-weight:700;
+  letter-spacing:.18em; text-transform:uppercase;
+  color:var(--muted);
+  margin:18px 0 0;
+}
+@keyframes comingSoonFade{
+  from{opacity:0; transform:translateY(6px);}
+  to{opacity:1; transform:none;}
+}
+
 @media (prefers-reduced-motion: reduce){*{animation:none !important;transition:none !important;}}

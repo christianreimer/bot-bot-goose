@@ -123,6 +123,10 @@ func main() {
 		Cache:         cacheClient,
 		Email:         sender,
 		Logger:        log,
+		// BBG_PRELAUNCH_MODE swaps the front page (and every URL that isn't
+		// /prelaunch, /privacy, or system routes) for an on-brand "coming
+		// soon" placeholder. Flip off at launch.
+		PrelaunchMode: os.Getenv("BBG_PRELAUNCH_MODE") != "",
 	})
 	if err != nil {
 		log.Error("build server", "err", err)

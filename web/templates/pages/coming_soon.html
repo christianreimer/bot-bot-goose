@@ -1,0 +1,29 @@
+{{ template "base.html" . }}
+
+{{ define "title" }}Coming soon · Bot Bot Goose{{ end }}
+
+{{ define "og" }}
+  <meta property="og:title" content="Bot Bot Goose — coming soon" />
+  <meta property="og:description" content="A daily puzzle where you spot the AI hiding among real humans. We launch when the deck is full." />
+{{ end }}
+
+{{/* Hide the right-side header slot so the wordmark feels centered. */}}
+{{ define "header-meta" }}{{ end }}
+
+{{ define "content" }}
+  <main class="stage coming-soon">
+    <section class="coming-soon-lede">
+      <span class="kicker">Coming soon</span>
+      <h1 class="prompt-headline coming-soon-headline">
+        Three humans.
+        <br /><span class="honk">One bot.</span>
+      </h1>
+      <p class="coming-soon-sub">
+        A daily puzzle where you spot the AI hiding among real lines.
+        We're stacking the deck right now — toss yours in.
+      </p>
+      <a class="btn btn-primary coming-soon-cta" href="/prelaunch">Add a line ▸</a>
+      <p class="coming-soon-meta">We launch when the deck is full.</p>
+    </section>
+  </main>
+{{ end }}

@@ -44,6 +44,15 @@ type Config struct {
 	// to e.g. "127.0.0.1:8081" is the recommended shape. Leave empty in
 	// dev/test — the metrics counters are still maintained, just not served.
 	MetricsListen string
+
+	// PrelaunchMode swaps the front page (and every URL that isn't the
+	// /prelaunch campaign, /privacy, or system routes) for a "coming soon"
+	// poster. Set BBG_PRELAUNCH_MODE=1 in the App env during the Reddit
+	// collection phase; flip it off at launch. While on, the game routes
+	// (`/`, `/me`, `/leaderboard/*`, share permalinks, /api/play/*,
+	// /api/auth/*) are not mounted at all — anyone poking at them lands
+	// on the coming-soon page.
+	PrelaunchMode bool
 }
 
 // Server is the top-level handler. Construct with New, mount as http.Handler.
@@ -169,12 +178,44 @@ func (s *Server) routes() {
 	r.Use(headSupport)
 
 	// System endpoints — no session, no CSRF, no template overhead.
+	// Always mounted, even in BBG_PRELAUNCH_MODE.
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("ok")) })
 	// Privacy disclosure. Outside the session-middleware group on purpose:
 	// reading the privacy page should not be the moment we set a cookie.
 	r.Get("/privacy", s.handlePrivacy)
 	r.Get("/readyz", s.handleReadyz)
 	r.Get("/robots.txt", s.handleRobots)
+
+	// Static — content-hashed URLs (?v=<hash>) come from the `asset` template
+	// helper, so we can set far-future Cache-Control here without risking a
+	// stale CSS/JS surviving a deploy. The manifest and service worker live
+	// at the root (unversioned) and stay short-cache so PWA updates roll.
+	fileServer := http.StripPrefix("/static/", http.FileServer(http.Dir(filepath.Join(s.cfg.WebDir, "static"))))
+	r.Handle("/static/*", cacheImmutable(fileServer))
+	r.Handle("/manifest.json", http.FileServer(http.Dir(filepath.Join(s.cfg.WebDir, "static"))))
+	r.Handle("/service-worker.js", noStore(http.FileServer(http.Dir(filepath.Join(s.cfg.WebDir, "static")))))
+
+	// Pre-launch poster mode. The Reddit collection campaign drives people
+	// to /prelaunch; anyone who pokes at "/" or any other URL during that
+	// window lands on a on-brand "coming soon" page. The play surface and
+	// its share permalinks are not mounted at all so curious URL-walkers
+	// can't trip them. Flip BBG_PRELAUNCH_MODE off at launch.
+	if s.cfg.PrelaunchMode {
+		// The Reddit-facing campaign still needs to work.
+		r.Get("/prelaunch/og.png", s.handlePrelaunchOG)
+		r.Group(func(r chi.Router) {
+			r.Use(users.Middleware(s.cfg.DB, s.cfg.Cache, s.cfg.Logger, s.cfg.SessionKey, s.cfg.SecureCookie))
+			r.Use(users.CSRFMiddleware(s.cfg.SecureCookie))
+			r.Get("/prelaunch", s.handlePrelaunch)
+			r.Post("/api/prelaunch/submit", s.handlePrelaunchSubmit)
+		})
+		// Everything else — "/", /me, /leaderboard/*, /d/<short>, /r/<short>,
+		// /api/*, /auth/magic/* — falls through to the poster.
+		r.Get("/", s.handleComingSoon)
+		r.NotFound(s.handleComingSoon)
+		s.router = r
+		return
+	}
 
 	// Public share + OG image routes — outside the session-middleware group
 	// on purpose. These handlers don't read users.FromContext, and routing
@@ -193,15 +234,6 @@ func (s *Server) routes() {
 	// because someone hit a typo'd URL is bad UX (and would mask the
 	// session-mint error path).
 	r.NotFound(s.renderNotFound)
-
-	// Static — content-hashed URLs (?v=<hash>) come from the `asset` template
-	// helper, so we can set far-future Cache-Control here without risking a
-	// stale CSS/JS surviving a deploy. The manifest and service worker live
-	// at the root (unversioned) and stay short-cache so PWA updates roll.
-	fileServer := http.StripPrefix("/static/", http.FileServer(http.Dir(filepath.Join(s.cfg.WebDir, "static"))))
-	r.Handle("/static/*", cacheImmutable(fileServer))
-	r.Handle("/manifest.json", http.FileServer(http.Dir(filepath.Join(s.cfg.WebDir, "static"))))
-	r.Handle("/service-worker.js", noStore(http.FileServer(http.Dir(filepath.Join(s.cfg.WebDir, "static")))))
 
 	// Player routes — all behind device-cookie session middleware.
 	r.Group(func(r chi.Router) {

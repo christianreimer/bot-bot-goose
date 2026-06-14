@@ -92,6 +92,10 @@ services:
       # curl smoke tests. Leave unset in production behind a TLS-terminating
       # proxy (Caddy or the Cloudflare Tunnel edge).
       BBG_DEV: ${BBG_DEV:-}
+      # BBG_PRELAUNCH_MODE=1 swaps "/" (and anything not under /prelaunch,
+      # /privacy, /healthz, /static) for the coming-soon poster. Used
+      # during the Reddit collection phase; flip off at launch.
+      BBG_PRELAUNCH_MODE: ${BBG_PRELAUNCH_MODE:-}
       TZ: UTC
     expose:
       - "8080"
