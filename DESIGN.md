@@ -126,7 +126,7 @@ Same mono treatment as tags. States: `pending` (honk tint), `live` (reed tint), 
 ## What we deliberately don't have
 
 - No avatars, no profile photos. Handles are typographic.
-- No onboarding flow. The first round is the onboarding.
+- No onboarding flow. A one-shot first-visit primer is allowed (modal, localStorage-gated, never returns); the first round still does most of the teaching.
 - No settings page beyond what `/me` does. Theme, font-size, language: not now.
 - No light mode.
 - No desktop-specific layout.

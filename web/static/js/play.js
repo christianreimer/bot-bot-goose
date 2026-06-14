@@ -72,13 +72,8 @@
 
   function renderRound() {
     const r = state.round;
-    // First-round, not-signed-in attention pulse on the hunt-target word.
-    // Returning signed-in players already know the rule; the pulse would
-    // just be noise. Round 1 only — by round 2 they've made a guess.
-    const showHuntPulse = r.index === 0 && stage.dataset.signedIn !== '1';
-    const huntClass = showHuntPulse ? 'hunt hunt-attention' : 'hunt';
     stage.innerHTML = `
-      <div class="round-label">Round ${r.index + 1} of ${N_ROUNDS} <span class="${huntClass}">· Catch the bot</span></div>
+      <div class="round-label">Round ${r.index + 1} of ${N_ROUNDS} <span class="hunt">· Catch the bot</span></div>
       <div class="prompt"></div>
       <div class="answers" id="answers"></div>
       <div class="controls" id="controls"></div>`;
