@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/hex"
 	"log/slog"
 	"os"
@@ -12,10 +13,13 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/christianreimer/bot-bot-goose/db/migrations"
 	"github.com/christianreimer/bot-bot-goose/internal/cache"
 	"github.com/christianreimer/bot-bot-goose/internal/db"
 	"github.com/christianreimer/bot-bot-goose/internal/email"
 	"github.com/christianreimer/bot-bot-goose/internal/httpx"
+	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for goose
+	"github.com/pressly/goose/v3"
 )
 
 func main() {
@@ -51,6 +55,19 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Apply embedded migrations before opening the connection pool, unless
+	// BBG_SKIP_MIGRATIONS=1. Idempotent: goose's up command is a fast no-op
+	// when the DB is already at the latest version. This is the deploy
+	// hook on DO App / DO Droplet / anywhere we don't run a separate
+	// goose binary — every bbg boot self-heals to the schema in
+	// db/migrations/.
+	if os.Getenv("BBG_SKIP_MIGRATIONS") == "" {
+		if err := applyMigrations(ctx, dbURL, log); err != nil {
+			log.Error("apply migrations", "err", err)
+			os.Exit(1)
+		}
+	}
 
 	pool, err := db.Open(ctx, dbURL)
 	if err != nil {
@@ -131,4 +148,32 @@ func envDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// applyMigrations opens a short-lived database/sql connection (goose's
+// dialect interface needs *sql.DB, not pgxpool), runs the migrations
+// embedded in db/migrations/, and closes. The actual application pool
+// is opened separately right after this returns.
+func applyMigrations(ctx context.Context, dbURL string, log *slog.Logger) error {
+	sqlDB, err := sql.Open("pgx", dbURL)
+	if err != nil {
+		return err
+	}
+	defer sqlDB.Close()
+	goose.SetBaseFS(migrations.FS)
+	goose.SetLogger(goose.NopLogger())
+	if err := goose.SetDialect("postgres"); err != nil {
+		return err
+	}
+	before, _ := goose.GetDBVersion(sqlDB)
+	if err := goose.UpContext(ctx, sqlDB, "."); err != nil {
+		return err
+	}
+	after, _ := goose.GetDBVersion(sqlDB)
+	if after != before {
+		log.Info("migrations applied", "from", before, "to", after)
+	} else {
+		log.Info("migrations up-to-date", "version", after)
+	}
+	return nil
 }
