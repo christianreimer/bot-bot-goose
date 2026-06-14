@@ -15,7 +15,7 @@
   <article class="stage privacy">
     <header class="privacy-header">
       <h1 class="prompt-headline">What we keep, what we don't.</h1>
-      <p class="privacy-updated">Updated 2026-06-13</p>
+      <p class="privacy-updated">Updated 2026-06-14</p>
     </header>
 
     <section class="privacy-section">
@@ -93,7 +93,8 @@
       <h3>Third parties</h3>
       <ul>
         <li><b>Resend</b> delivers our sign-in emails. They see your email address (they have to, to deliver the message) and keep their own delivery logs, as their privacy policy explains. We don't use anything else from Resend.</li>
-        <li><b>DigitalOcean</b> hosts our server and the database that holds the records described above. Their staff don't access your data day-to-day, but the data lives on their hardware, so their policies apply at the infrastructure layer.</li>
+        <li><b>DigitalOcean</b> hosts our server, our database, and our cache. Their staff don't access your data day-to-day, but the data lives on their hardware, so their policies apply at the infrastructure layer.</li>
+        <li><b>Cloudflare</b> sits in front of our server as DigitalOcean's edge. They see your IP address, browser identity (user-agent), and the URL you requested in transit, used to terminate TLS and block abusive traffic. We don't use any Cloudflare analytics or marketing features.</li>
       </ul>
       <p>That's the whole list.</p>
     </section>
