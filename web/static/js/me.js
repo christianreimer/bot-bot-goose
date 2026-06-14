@@ -62,7 +62,7 @@
       const r = await postJSON('/api/auth/magic/request', { email });
       if (hint) {
         hint.classList.remove('warn');
-        hint.textContent = "if that email is on file, we just sent a sign-in link. check your inbox.";
+        hint.textContent = "sign-in link sent. check your inbox.";
       }
       magicForm.querySelector('button').disabled = true;
     });
