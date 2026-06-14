@@ -183,6 +183,7 @@ header{
 .btn:active{transform:scale(.985);}
 .btn-primary{background:var(--honk);color:#241400;}
 .btn-primary:hover{filter:brightness(1.06);}
+.btn-primary:disabled{opacity:.45;cursor:default;filter:none;}
 .btn-ghost{background:transparent;border:1.5px solid var(--line);color:var(--ink);font-family:var(--body);font-weight:600;font-size:14px;padding:13px;min-height:48px;}
 .btn-ghost:hover{border-color:rgba(244,239,227,.3);}
 .btn-ghost:disabled{opacity:.35;cursor:default;}

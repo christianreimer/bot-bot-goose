@@ -131,10 +131,10 @@
 
     state.outcomes = res.outcomes;
     revealRound(slot, res.target_slots, res.outcome);
-    armRealestVote(res.target_slots);
 
-    // Replace the controls with a vote prompt + "Next round" / "See result"
-    // button. The vote is optional — skipping by tapping Next records nothing.
+    // Replace the controls with a vote prompt + a Next button that's
+    // disabled until the player casts their realest pick. The pick is
+    // the gate to advancing — armRealestVote enables Next on success.
     const ctl = document.getElementById('controls');
     ctl.innerHTML = '';
 
@@ -146,6 +146,7 @@
 
     const next = document.createElement('button');
     next.className = 'btn btn-primary';
+    next.disabled = true;
     if (res.completed) {
       next.textContent = 'See your result ▸';
       next.onclick = () => {
@@ -163,13 +164,17 @@
       };
     }
     ctl.appendChild(next);
+    armRealestVote(res.target_slots, next, voteHint);
     renderProgress();
   }
 
   // Wire up "felt most human" voting. Only the three human cards are
   // tappable — the goose card has already been outed and is not votable.
   // One vote per round, final once cast — mirrors the bot-guess pick.
-  function armRealestVote(targetSlots) {
+  // The chosen card's chip is the visual confirmation; we hide the
+  // prompt and unlock the Next button so advancing reads as a fresh
+  // affordance, not a second nag.
+  function armRealestVote(targetSlots, nextBtn, voteHint) {
     const targets = new Set(targetSlots || []);
     const r = state.round;
     const btns = document.querySelectorAll('.answer');
@@ -200,15 +205,18 @@
             other.appendChild(chip);
           }
         });
-        const hint = document.getElementById('voteHint');
-        if (hint) hint.textContent = 'Vote locked.';
+        if (voteHint) voteHint.hidden = true;
+        if (nextBtn) nextBtn.disabled = false;
         try {
           await postJSON(`/api/play/round/${r.index}/realest`, {
             token: r.token,
             slot: idx,
           });
         } catch (e) {
-          if (hint) hint.textContent = 'Vote failed: ' + e.message;
+          if (voteHint) {
+            voteHint.hidden = false;
+            voteHint.textContent = 'Vote failed: ' + e.message;
+          }
         }
       });
     });
