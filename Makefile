@@ -12,17 +12,30 @@ SQLC  := go run github.com/sqlc-dev/sqlc/cmd/sqlc@latest
 
 COMPOSE := docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env
 
+# Cloudflare Quick Tunnel state. The local stack ships traffic through a
+# free trycloudflare.com URL so the user can hit the app from a phone or
+# share a link without router/firewall work. State lives in .tunnel/ —
+# gitignored, regenerated every `make up`.
+TUNNEL_DIR := .tunnel
+TUNNEL_LOG := $(TUNNEL_DIR)/cloudflared.log
+TUNNEL_PID := $(TUNNEL_DIR)/cloudflared.pid
+TUNNEL_URL_REGEX := 'https://[a-z0-9-]+\.trycloudflare\.com'
+# -a forces grep to treat the cloudflared log as text — its color-escape
+# bytes sometimes trip grep's binary-file heuristic.
+TUNNEL_GREP := grep -aoE $(TUNNEL_URL_REGEX)
+
 # ---- docker-compose lifecycle ----------------------------------------------
 
-.PHONY: up up-prod down rebuild logs logs-prod ps
+.PHONY: up up-prod down rebuild logs logs-prod ps tunnel-up tunnel-down tunnel-url
 
-# Local-testing stack: bbg + bundled postgres + bundled valkey. Traffic
-# comes in via the Cloudflare Tunnel daemon pointed straight at
-# 127.0.0.1:8080 (Caddy would just be a dead branch trying to provision
-# certs locally, so it's reserved for `up-prod`). The `local` profile
-# opts postgres and valkey into the compose lifecycle.
+# Local-testing stack: bbg + bundled postgres + bundled valkey, plus a
+# Cloudflare Quick Tunnel so the local instance gets a public URL.
+# Caddy stays out (it would just dead-end trying to provision certs for
+# localhost — reserved for `up-prod`). The `local` profile opts postgres
+# and valkey into the compose lifecycle.
 up:
 	$(COMPOSE) --profile local up -d
+	@$(MAKE) --no-print-directory tunnel-up
 
 # Production stack (DigitalOcean droplet): bbg + Caddy as the TLS edge.
 # Postgres + Valkey are NOT bundled — the bbg container talks to DO
@@ -34,6 +47,70 @@ up-prod:
 # Bring down everything regardless of which profile started it.
 down:
 	$(COMPOSE) --profile local --profile edge down
+	@$(MAKE) --no-print-directory tunnel-down
+
+# Start a Cloudflare Quick Tunnel pointed at the local bbg port and print
+# the public URL once cloudflared has it. Idempotent: a re-run prints the
+# existing tunnel's URL instead of spawning a second daemon.
+#
+# The body is one big shell block so the early-exit branches (already
+# running / cloudflared missing) don't fall through to spawning a second
+# daemon. Each Makefile recipe line otherwise runs in its own shell, so
+# `exit 0` in one wouldn't bail out of the recipe.
+tunnel-up:
+	@set -e; \
+	if ! command -v cloudflared >/dev/null 2>&1; then \
+		echo "cloudflared not installed — skipping tunnel"; \
+		echo "  install: brew install cloudflared"; \
+		exit 0; \
+	fi; \
+	mkdir -p $(TUNNEL_DIR); \
+	if [ -f $(TUNNEL_PID) ] && kill -0 $$(cat $(TUNNEL_PID)) 2>/dev/null; then \
+		url=$$($(TUNNEL_GREP) $(TUNNEL_LOG) 2>/dev/null | head -1); \
+		echo "tunnel already running (pid $$(cat $(TUNNEL_PID)))"; \
+		[ -n "$$url" ] && echo "tunnel URL: $$url" || echo "tunnel URL: <not yet logged>"; \
+		exit 0; \
+	fi; \
+	: > $(TUNNEL_LOG); \
+	nohup cloudflared tunnel --url http://localhost:8080 > $(TUNNEL_LOG) 2>&1 & echo $$! > $(TUNNEL_PID); \
+	printf "starting cloudflare tunnel"; \
+	for i in $$(seq 1 30); do \
+		url=$$($(TUNNEL_GREP) $(TUNNEL_LOG) 2>/dev/null | head -1); \
+		if [ -n "$$url" ]; then \
+			echo ""; echo ""; \
+			echo "  bbg: http://localhost:8080"; \
+			echo "  tunnel URL: $$url"; \
+			echo ""; \
+			echo "  logs: tail -f $(TUNNEL_LOG)"; \
+			echo "  stop: make tunnel-down (or make down)"; \
+			exit 0; \
+		fi; \
+		printf "."; sleep 1; \
+	done; \
+	echo " timed out after 30s"; \
+	echo "see $(TUNNEL_LOG)"; \
+	exit 1
+
+# Stop the running tunnel. No-op when nothing is running.
+tunnel-down:
+	@if [ -f $(TUNNEL_PID) ]; then \
+		pid=$$(cat $(TUNNEL_PID)); \
+		if kill -0 $$pid 2>/dev/null; then \
+			echo "stopping cloudflare tunnel (pid $$pid)"; \
+			kill $$pid 2>/dev/null || true; \
+		fi; \
+		rm -f $(TUNNEL_PID); \
+	fi
+
+# Print the current tunnel URL. Useful when re-attaching to a long-lived
+# `make up` from a fresh terminal.
+tunnel-url:
+	@if [ ! -f $(TUNNEL_PID) ] || ! kill -0 $$(cat $(TUNNEL_PID) 2>/dev/null) 2>/dev/null; then \
+		echo "no tunnel running" >&2; exit 1; \
+	fi; \
+	url=$$($(TUNNEL_GREP) $(TUNNEL_LOG) 2>/dev/null | head -1); \
+	if [ -z "$$url" ]; then echo "tunnel URL not yet visible in log" >&2; exit 1; fi; \
+	echo "$$url"
 
 # Rebuilds the bbg image and recreates only its container; works under
 # either `up` mode because the bbg service is profile-less.

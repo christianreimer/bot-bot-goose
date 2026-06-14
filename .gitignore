@@ -46,5 +46,10 @@ desktop.ini
 *.csr
 *.p12
 
+# Local Cloudflare Quick Tunnel state — `make up` writes here. The PID
+# and the trycloudflare.com URL change every restart; nothing here is
+# worth committing.
+/.tunnel/
+
 # Scratch
 /tmp/
