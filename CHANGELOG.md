@@ -6,6 +6,11 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 Tracked in [BACKLOG.md](BACKLOG.md). Most prominent: moderation queue UI, magic-link auth, AI-detection on submissions, slot E/P/B bandit in the composer.
 
+### Changed — Default handle `AnonymousGoose<n>` → `Human<n>` (migration 0012)
+
+- `CreateAnonymousUser` now mints handles of the form `Human<n>`. Sequence renamed `anonymous_goose_seq` → `human_seq`; existing `AnonymousGoose<n>` rows backfilled to `Human<n>` with the same number.
+- Reserved-prefix check narrowed to the exact `Human<digits>` shape so substrings like `humanity` or `humanlike` remain pickable as manual handles.
+
 ### Changed — Single-mode revert (migration 0008)
 
 - Dropped the inverted "Find the Human" mode and its scaffolding across schema, scoring, share renderers, intro modal, and admin tooling. Every puzzle is now 1 bot + 3 decoys, period.

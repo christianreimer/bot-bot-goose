@@ -270,10 +270,11 @@ func (s *Server) handlePatchHandle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	lower := strings.ToLower(h)
-	// AnonymousGoose<n> is the auto-assigned-handle namespace (migration
-	// 0007). Reserving the lowercase prefix prevents a user from manually
-	// picking a value that would later collide with a freshly minted one.
-	if strings.HasPrefix(lower, "anonymousgoose") {
+	// "Human<digits>" is the auto-assigned-handle namespace (migration
+	// 0012). Reserving exactly that shape — not "human*" — prevents a user
+	// from squatting a value that the auto-assigner might later mint, while
+	// still allowing legitimate handles like "humanity" or "humanlike".
+	if isAutoAssignedHandle(lower) {
 		writeJSONErr(w, http.StatusBadRequest, "reserved", "that handle is reserved")
 		return
 	}
@@ -296,6 +297,23 @@ func (s *Server) handlePatchHandle(w http.ResponseWriter, r *http.Request) {
 		users.InvalidateCookieHash(r.Context(), s.cfg.Cache, hash)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"handle": h})
+}
+
+// isAutoAssignedHandle reports whether `lower` matches the auto-assigned
+// "human<digits>" shape that CreateAnonymousUser mints. validHandle has
+// already ensured the input is ASCII alphanumeric / _ / -, so the check
+// is a cheap prefix + digit scan with no regex.
+func isAutoAssignedHandle(lower string) bool {
+	const prefix = "human"
+	if !strings.HasPrefix(lower, prefix) || len(lower) <= len(prefix) {
+		return false
+	}
+	for _, c := range lower[len(prefix):] {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func validHandle(h string) bool {

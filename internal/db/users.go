@@ -9,16 +9,16 @@ import (
 )
 
 // CreateAnonymousUser inserts a user with no email and an auto-assigned
-// handle of the form "AnonymousGoose<n>". The number is drawn from the
-// anonymous_goose_seq sequence (migration 0007), so even brand-new
-// anonymous players have a stable display name across leaderboards and
-// share artifacts. Returns the new id and assigned handle.
+// handle of the form "Human<n>". The number is drawn from the human_seq
+// sequence (migration 0012), so even brand-new anonymous players have a
+// stable display name across leaderboards and share artifacts. Returns
+// the new id and assigned handle.
 func (d *DB) CreateAnonymousUser(ctx context.Context) (uuid.UUID, string, error) {
 	var id uuid.UUID
 	var handle string
 	err := d.QueryRow(ctx, `
 		INSERT INTO users (handle)
-		VALUES ('AnonymousGoose' || nextval('anonymous_goose_seq'))
+		VALUES ('Human' || nextval('human_seq'))
 		RETURNING id, handle
 	`).Scan(&id, &handle)
 	return id, handle, err

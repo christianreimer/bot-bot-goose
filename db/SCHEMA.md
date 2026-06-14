@@ -32,7 +32,7 @@ The account/profile row. Anonymous device users get one too.
 **FKs out:** none.
 **FKs in:** referenced by ~15 tables; central identity row.
 
-**Auto-handle on insert:** migration 0007 added a sequence `anonymous_goose_seq` and a backfill that assigns `'AnonymousGoose' || nextval('anonymous_goose_seq')` to every NULL-handle live user. The runtime `CreateAnonymousUser` keeps populating the same shape on each new device cookie, so the `handle` column is effectively always non-empty on live rows; the manual-handle path reserves the `AnonymousGoose*` namespace to prevent collision.
+**Auto-handle on insert:** migration 0007 introduced an auto-handle sequence; migration 0012 renamed it to `human_seq` and renamed the existing `AnonymousGoose<n>` handles to `Human<n>`. The runtime `CreateAnonymousUser` assigns `'Human' || nextval('human_seq')` on every new device cookie, so the `handle` column is effectively always non-empty on live rows. The manual-handle path reserves the `Human<digits>` shape to prevent collision (substrings like `humanity` or `humanlike` stay pickable).
 
 **Example rows:**
 
@@ -40,7 +40,7 @@ The account/profile row. Anonymous device users get one too.
 |--------------|----------------------|-----------------------|----------|-------------|-------------------|
 | `a1b2c3d4…`  | `alice`              | `alice@example.com`   | player   | 1247        | false             |
 | `b5c6d7e8…`  | `bob_42`             | `bob@example.com`     | reviewer | 1380        | true              |
-| `c9d0e1f2…`  | `AnonymousGoose1184` | *(null)*              | player   | 1200        | false             |
+| `c9d0e1f2…`  | `Human1184`          | *(null)*              | player   | 1200        | false             |
 
 ### `device_cookies`
 
