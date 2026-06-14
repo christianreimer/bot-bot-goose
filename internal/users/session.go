@@ -15,6 +15,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -99,7 +100,10 @@ func FromContext(ctx context.Context) *db.User {
 // goes straight to Postgres. This matches the launch-capacity plan's
 // universal "miss → Postgres" rule and keeps dev/test setups working
 // without Valkey running.
-func Middleware(d *db.DB, c *cache.Cache, secret []byte, secureCookie bool) func(http.Handler) http.Handler {
+func Middleware(d *db.DB, c *cache.Cache, log *slog.Logger, secret []byte, secureCookie bool) func(http.Handler) http.Handler {
+	if log == nil {
+		log = slog.Default()
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
@@ -107,6 +111,11 @@ func Middleware(d *db.DB, c *cache.Cache, secret []byte, secureCookie bool) func
 			raw, _ := readCookie(r)
 			user, cleartext, err := resolveOrMint(ctx, d, c, secret, raw, r.UserAgent())
 			if err != nil {
+				// Without this log line a misconfigured DB / Valkey / missing
+				// migration silently flunks every request to the public
+				// surfaces with an opaque "session error". The underlying
+				// pg or redis message tells the operator exactly what to fix.
+				log.Error("session error", "err", err, "path", r.URL.Path)
 				http.Error(w, "session error", http.StatusInternalServerError)
 				return
 			}

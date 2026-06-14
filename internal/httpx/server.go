@@ -205,7 +205,7 @@ func (s *Server) routes() {
 
 	// Player routes — all behind device-cookie session middleware.
 	r.Group(func(r chi.Router) {
-		r.Use(users.Middleware(s.cfg.DB, s.cfg.Cache, s.cfg.SessionKey, s.cfg.SecureCookie))
+		r.Use(users.Middleware(s.cfg.DB, s.cfg.Cache, s.cfg.Logger, s.cfg.SessionKey, s.cfg.SecureCookie))
 		r.Use(users.CSRFMiddleware(s.cfg.SecureCookie))
 
 		// Only one entry point to the play surface: "/" serves today's
