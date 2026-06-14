@@ -168,12 +168,12 @@
 
   // Wire up "felt most human" voting. Only the three human cards are
   // tappable — the goose card has already been outed and is not votable.
-  // One vote per round; tapping again moves the vote (idempotent server-side).
+  // One vote per round, final once cast — mirrors the bot-guess pick.
   function armRealestVote(targetSlots) {
     const targets = new Set(targetSlots || []);
     const r = state.round;
     const btns = document.querySelectorAll('.answer');
-    let chosenSlot = null;
+    let voted = false;
 
     btns.forEach((b, idx) => {
       if (targets.has(idx)) return; // bot card not votable
@@ -183,17 +183,17 @@
       // Tap-to-vote on the human cards. The earlier reveal logic already
       // disabled them; we re-enable for the vote phase.
       b.addEventListener('click', async () => {
-        if (chosenSlot === idx) return;
-        chosenSlot = idx;
-        // Visual: drop the chip on the chosen card, strip it from any prior
-        // selection, and pulse the .voted class for the border treatment.
+        if (voted) return;
+        voted = true;
+
+        // Drop the chip on the chosen card and lock every human card so
+        // no further taps register. The bot card was never enabled.
         btns.forEach((other, otherIdx) => {
           if (targets.has(otherIdx)) return;
-          const wasChosen = otherIdx === idx;
-          other.classList.toggle('voted', wasChosen);
-          const existing = other.querySelector('.tag.human');
-          if (existing) existing.remove();
-          if (wasChosen) {
+          other.classList.remove('votable');
+          other.disabled = true;
+          if (otherIdx === idx) {
+            other.classList.add('voted');
             const chip = document.createElement('span');
             chip.className = 'tag human';
             chip.textContent = 'most human';
@@ -201,7 +201,7 @@
           }
         });
         const hint = document.getElementById('voteHint');
-        if (hint) hint.textContent = 'Vote logged. Tap another to switch.';
+        if (hint) hint.textContent = 'Vote locked.';
         try {
           await postJSON(`/api/play/round/${r.index}/realest`, {
             token: r.token,

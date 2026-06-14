@@ -614,6 +614,10 @@ func (s *Server) handleAPIRealest(w http.ResponseWriter, r *http.Request) {
 
 	res, err := s.cfg.DB.CastRealestVote(ctx, prRow.ID, *chosen.DecoyID)
 	if err != nil {
+		if errors.Is(err, db.ErrAlreadyVoted) {
+			writeJSONErr(w, http.StatusConflict, "already_voted", "")
+			return
+		}
 		writeJSONErr(w, http.StatusInternalServerError, "vote_failed", err.Error())
 		return
 	}

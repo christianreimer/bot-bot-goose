@@ -417,22 +417,27 @@ func (d *DB) ForgerRankingFor(ctx context.Context, userID uuid.UUID, gate int64)
 // CastRealestVoteResult names the outcome of a vote so the API can return
 // a structured response.
 type CastRealestVoteResult struct {
-	Recorded   bool      // true on first vote, false on re-vote
-	PreviousID uuid.UUID // zero value when this is the first vote
+	Recorded bool // always true; reserved for forward-compat
 }
 
-// CastRealestVote records (or re-records) the player's "felt most human"
-// vote for a round. Inside one transaction:
-//   - looks up the round's prior realest_decoy_id
-//   - writes the new decoy id to play_rounds
-//   - on first vote: +1 realest_impressions for each of the 3 human decoys
-//     in the round, +1 realest_votes for the chosen one
-//   - on re-vote: shifts 1 realest_vote from the prior decoy to the new one
-//     (impressions stay put — the round was only ever "shown" once)
+// ErrAlreadyVoted is returned by CastRealestVote when the round already
+// has a realest_decoy_id set. The realest pick mirrors the bot guess —
+// one-shot, final, no swap-after-the-fact. Callers should treat it as a
+// 409 to the client.
+var ErrAlreadyVoted = errors.New("realest vote already cast for this round")
+
+// CastRealestVote records the player's "felt most human" vote for a
+// round. One-shot: if the round already has a realest_decoy_id, the
+// call returns ErrAlreadyVoted without touching anything. Inside one
+// transaction on a fresh vote:
+//   - writes realest_decoy_id on play_rounds (failing if a concurrent
+//     vote raced us)
+//   - +1 realest_impressions for each of the 3 human decoys in the
+//     round, +1 realest_votes for the chosen one
 //
-// The handler is responsible for validating that newDecoyID is one of the
-// three human decoys actually shown in this round. The DB layer trusts the
-// caller on identity.
+// The handler is responsible for validating that newDecoyID is one of
+// the three human decoys actually shown in this round. The DB layer
+// trusts the caller on identity.
 func (d *DB) CastRealestVote(ctx context.Context, playRoundID, newDecoyID uuid.UUID) (CastRealestVoteResult, error) {
 	tx, err := d.Begin(ctx)
 	if err != nil {
@@ -440,78 +445,56 @@ func (d *DB) CastRealestVote(ctx context.Context, playRoundID, newDecoyID uuid.U
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	var prev *uuid.UUID
-	if err := tx.QueryRow(ctx,
-		`SELECT realest_decoy_id FROM play_rounds WHERE id = $1`, playRoundID,
-	).Scan(&prev); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+	// Conditional write — only the round whose realest_decoy_id is still
+	// NULL gets updated. Two concurrent first-vote requests race here;
+	// whichever loses gets RowsAffected == 0 and exits with ErrAlreadyVoted.
+	ct, err := tx.Exec(ctx,
+		`UPDATE play_rounds
+		    SET realest_decoy_id = $2
+		  WHERE id = $1
+		    AND realest_decoy_id IS NULL`,
+		playRoundID, newDecoyID,
+	)
+	if err != nil {
+		return CastRealestVoteResult{}, err
+	}
+	if ct.RowsAffected() == 0 {
+		// Either the row doesn't exist or it's already been voted on.
+		// Disambiguate so the handler can surface the right code.
+		var exists bool
+		if err := tx.QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM play_rounds WHERE id = $1)`, playRoundID,
+		).Scan(&exists); err != nil {
+			return CastRealestVoteResult{}, err
+		}
+		if !exists {
 			return CastRealestVoteResult{}, ErrNotFound
 		}
-		return CastRealestVoteResult{}, err
+		return CastRealestVoteResult{}, ErrAlreadyVoted
 	}
 
-	if _, err := tx.Exec(ctx,
-		`UPDATE play_rounds SET realest_decoy_id = $2 WHERE id = $1`,
-		playRoundID, newDecoyID,
-	); err != nil {
-		return CastRealestVoteResult{}, err
-	}
-
-	if prev == nil {
-		// First vote on this round. +1 realest_impressions to every decoy
-		// shown in the round; +1 realest_votes to the chosen one.
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO decoy_daily_stats (decoy_id, stat_date, realest_impressions, realest_votes)
-			SELECT pra.decoy_id,
-			       CURRENT_DATE,
-			       1,
-			       CASE WHEN pra.decoy_id = $2 THEN 1 ELSE 0 END
-			  FROM play_rounds pr
-			  JOIN plays p              ON p.id = pr.play_id
-			  JOIN puzzle_rounds qr     ON qr.daily_puzzle_id = p.daily_puzzle_id
-			                            AND qr.round_index    = pr.round_index
-			  JOIN puzzle_round_answers pra ON pra.round_id = qr.id
-			 WHERE pr.id = $1 AND pra.content_kind = 'decoy'
-			ON CONFLICT (decoy_id, stat_date) DO UPDATE
-			   SET realest_impressions = decoy_daily_stats.realest_impressions + EXCLUDED.realest_impressions,
-			       realest_votes       = decoy_daily_stats.realest_votes       + EXCLUDED.realest_votes
-		`, playRoundID, newDecoyID); err != nil {
-			return CastRealestVoteResult{}, err
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return CastRealestVoteResult{}, err
-		}
-		return CastRealestVoteResult{Recorded: true}, nil
-	}
-
-	// Re-vote: same decoy → no-op.
-	if *prev == newDecoyID {
-		if err := tx.Commit(ctx); err != nil {
-			return CastRealestVoteResult{}, err
-		}
-		return CastRealestVoteResult{Recorded: false, PreviousID: *prev}, nil
-	}
-
-	// Move 1 realest_vote from prev → new. Impressions unchanged.
-	if _, err := tx.Exec(ctx, `
-		UPDATE decoy_daily_stats
-		   SET realest_votes = GREATEST(realest_votes - 1, 0)
-		 WHERE decoy_id = $1
-		   AND stat_date = (SELECT MAX(stat_date) FROM decoy_daily_stats WHERE decoy_id = $1)
-	`, *prev); err != nil {
-		return CastRealestVoteResult{}, err
-	}
+	// +1 realest_impressions on every decoy shown in this round; +1
+	// realest_votes on the chosen one.
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO decoy_daily_stats (decoy_id, stat_date, realest_impressions, realest_votes)
-		VALUES ($1, CURRENT_DATE, 0, 1)
+		SELECT pra.decoy_id,
+		       CURRENT_DATE,
+		       1,
+		       CASE WHEN pra.decoy_id = $2 THEN 1 ELSE 0 END
+		  FROM play_rounds pr
+		  JOIN plays p              ON p.id = pr.play_id
+		  JOIN puzzle_rounds qr     ON qr.daily_puzzle_id = p.daily_puzzle_id
+		                            AND qr.round_index    = pr.round_index
+		  JOIN puzzle_round_answers pra ON pra.round_id = qr.id
+		 WHERE pr.id = $1 AND pra.content_kind = 'decoy'
 		ON CONFLICT (decoy_id, stat_date) DO UPDATE
-		   SET realest_votes = decoy_daily_stats.realest_votes + 1
-	`, newDecoyID); err != nil {
+		   SET realest_impressions = decoy_daily_stats.realest_impressions + EXCLUDED.realest_impressions,
+		       realest_votes       = decoy_daily_stats.realest_votes       + EXCLUDED.realest_votes
+	`, playRoundID, newDecoyID); err != nil {
 		return CastRealestVoteResult{}, err
 	}
-
 	if err := tx.Commit(ctx); err != nil {
 		return CastRealestVoteResult{}, err
 	}
-	return CastRealestVoteResult{Recorded: false, PreviousID: *prev}, nil
+	return CastRealestVoteResult{Recorded: true}, nil
 }
