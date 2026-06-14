@@ -17,6 +17,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/christianreimer/bot-bot-goose/internal/cache"
 	"github.com/christianreimer/bot-bot-goose/internal/db"
 	"github.com/christianreimer/bot-bot-goose/internal/puzzle"
 )
@@ -104,6 +105,16 @@ func runBuild(ctx context.Context, d *db.DB, log *slog.Logger, date time.Time) e
 			return err
 		}
 	}
+
+	// Evict any cached rounds bundle for this puzzle. The first build leaves
+	// the cache empty so this is a no-op, but a re-build (admin recomposing
+	// today's puzzle) needs the cache to drop so live players see the new
+	// answers within seconds, not after the 1-hour TTL.
+	if c, err := cache.New(ctx, os.Getenv("BBG_VALKEY_URL"), log); err == nil {
+		defer c.Close()
+		puzzle.InvalidateRoundsBundle(ctx, c, puzzleID)
+	}
+
 	log.Info("puzzle built", "n", n)
 	return nil
 }

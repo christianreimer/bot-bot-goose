@@ -17,7 +17,7 @@ import (
 // with enough to locate them in the database.
 func (s *Server) handlePrivacy(w http.ResponseWriter, r *http.Request) {
 	var userID string
-	if u, err := users.ResolveOnly(r.Context(), s.cfg.DB, s.cfg.SessionKey, r); err == nil && u != nil {
+	if u, err := users.ResolveOnly(r.Context(), s.cfg.DB, s.cfg.Cache, s.cfg.SessionKey, r); err == nil && u != nil {
 		userID = u.ID.String()
 	}
 	s.renderHTML(w, http.StatusOK, "pages/privacy.html", map[string]any{

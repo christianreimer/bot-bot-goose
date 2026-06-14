@@ -12,6 +12,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/christianreimer/bot-bot-goose/internal/cache"
 	"github.com/christianreimer/bot-bot-goose/internal/db"
 	"github.com/christianreimer/bot-bot-goose/internal/email"
 	"github.com/christianreimer/bot-bot-goose/internal/httpx"
@@ -22,6 +23,10 @@ func main() {
 	slog.SetDefault(log)
 
 	listen := envDefault("BBG_LISTEN", ":8080")
+	// Optional second listener for /metrics. Bind to a loopback / private IP
+	// so Caddy + Cloudflare don't proxy it. Empty disables metrics serving
+	// (the counters are still maintained — they just aren't exposed via HTTP).
+	metricsListen := os.Getenv("BBG_METRICS_LISTEN")
 	dbURL := envDefault("BBG_DB_URL", "postgres://bbg:bbg@localhost:5432/bbg?sslmode=disable")
 	baseURL := envDefault("BBG_BASE_URL", "http://localhost:8080")
 	webDir := envDefault("BBG_WEB_DIR", "web")
@@ -54,6 +59,21 @@ func main() {
 	}
 	defer pool.Close()
 
+	// Optional Valkey cache. When BBG_VALKEY_URL is empty (the dev default)
+	// every cache layer falls back to direct Postgres — see plans/launch-
+	// capacity §2. The construction blocks on a Ping so a typo'd URL fails
+	// at boot instead of at the first read.
+	valkeyURL := os.Getenv("BBG_VALKEY_URL")
+	cacheClient, err := cache.New(ctx, valkeyURL, log)
+	if err != nil {
+		log.Error("open valkey", "err", err)
+		os.Exit(1)
+	}
+	defer cacheClient.Close()
+	if cacheClient.Enabled() {
+		log.Info("valkey enabled")
+	}
+
 	// Email sender. BBG_EMAIL_PROVIDER controls which one runs; "log" is
 	// the safe dev default that prints magic links to stdout. Production
 	// flips to "resend" and requires BBG_RESEND_API_KEY + BBG_EMAIL_FROM.
@@ -76,14 +96,16 @@ func main() {
 	}
 
 	srv, err := httpx.New(httpx.Config{
-		Listen:       listen,
-		BaseURL:      baseURL,
-		WebDir:       webDir,
-		SessionKey:   sessionKey,
-		SecureCookie: !dev, // local http needs Secure=false
-		DB:           pool,
-		Email:        sender,
-		Logger:       log,
+		Listen:        listen,
+		MetricsListen: metricsListen,
+		BaseURL:       baseURL,
+		WebDir:        webDir,
+		SessionKey:    sessionKey,
+		SecureCookie:  !dev, // local http needs Secure=false
+		DB:            pool,
+		Cache:         cacheClient,
+		Email:         sender,
+		Logger:        log,
 	})
 	if err != nil {
 		log.Error("build server", "err", err)

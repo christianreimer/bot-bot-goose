@@ -15,18 +15,14 @@ type HarvestPrompt struct {
 	Text string
 }
 
-// HarvestDeck returns up to `limit` prompts that:
+// HarvestEligiblePool returns every prompt that's not retired AND has fewer
+// than 5 live (non-rejected) rows in pre_launch_submissions. Unfiltered by
+// user — that filter happens in Go after a cache lookup, see plan §2.7.
 //
-//   - are not retired,
-//   - have FEWER THAN 5 live (non-rejected) rows in pre_launch_submissions
-//     (under-supplied),
-//   - have no row from this device in pre_launch_submissions (don't repeat;
-//     a rejected row still counts as "this device already answered").
-//
-// Order is random so concurrent harvesters don't all hit the same prompts.
-// At v1 scale the CTE is cheap; the partial index pre_launch_live_prompt_idx
-// (migration 0006) keeps the filtered count query indexed.
-func (d *DB) HarvestDeck(ctx context.Context, userID uuid.UUID, limit int) ([]HarvestPrompt, error) {
+// The list is small enough (~hundreds at v1) that returning it whole and
+// sampling client-side beats running the random+limit in SQL on every
+// harvest request.
+func (d *DB) HarvestEligiblePool(ctx context.Context) ([]HarvestPrompt, error) {
 	const q = `
 		WITH counts AS (
 		    SELECT prompt_id, count(*) AS n
@@ -39,14 +35,8 @@ func (d *DB) HarvestDeck(ctx context.Context, userID uuid.UUID, limit int) ([]Ha
 		  LEFT JOIN counts c ON c.prompt_id = p.id
 		 WHERE p.retired_at IS NULL
 		   AND COALESCE(c.n, 0) < 5
-		   AND NOT EXISTS (
-		       SELECT 1 FROM pre_launch_submissions ps
-		        WHERE ps.prompt_id = p.id AND ps.user_id = $1
-		   )
-		 ORDER BY random()
-		 LIMIT $2
 	`
-	rows, err := d.Query(ctx, q, userID, limit)
+	rows, err := d.Query(ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -58,6 +48,28 @@ func (d *DB) HarvestDeck(ctx context.Context, userID uuid.UUID, limit int) ([]Ha
 			return nil, err
 		}
 		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// HarvestSubmittedPromptIDs returns the prompt IDs this user has already
+// submitted for (including rejected rows — a rejected row still counts as
+// "this device already answered"). Cheap, indexed scan; cached at the
+// caller as a small map.
+func (d *DB) HarvestSubmittedPromptIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	const q = `SELECT prompt_id FROM pre_launch_submissions WHERE user_id = $1`
+	rows, err := d.Query(ctx, q, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
 	}
 	return out, rows.Err()
 }

@@ -218,6 +218,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		if err := s.cfg.DB.DeleteDeviceCookie(r.Context(), hash); err != nil {
 			s.cfg.Logger.Warn("logout: delete cookie row", "err", err)
 		}
+		users.InvalidateCookieHash(r.Context(), s.cfg.Cache, hash)
 	}
 	users.ClearCookie(w, s.cfg.SecureCookie)
 	writeJSON(w, http.StatusOK, map[string]string{"code": "ok"})
@@ -229,6 +230,10 @@ func (s *Server) handleLogoutAll(w http.ResponseWriter, r *http.Request) {
 		if err := s.cfg.DB.DeleteAllDeviceCookiesForUser(r.Context(), u.ID); err != nil {
 			s.cfg.Logger.Warn("logout-all: delete user cookies", "err", err)
 		}
+		// Caller-driven invalidation of every per-device user cache entry is
+		// impossible without enumerating cookie hashes (we don't store them
+		// indexed by user_id). The cached blobs age out within
+		// users.userCacheTTL — see plan §2.3 trade-off.
 	}
 	users.ClearCookie(w, s.cfg.SecureCookie)
 	writeJSON(w, http.StatusOK, map[string]string{"code": "ok"})
@@ -284,6 +289,11 @@ func (s *Server) handlePatchHandle(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSONErr(w, http.StatusInternalServerError, "db", err.Error())
 		return
+	}
+	// Invalidate the cached user blob for THIS device so the next request
+	// sees the new handle immediately. Sibling devices still ride the TTL.
+	if hash := users.CurrentDeviceCookieHash(r, s.cfg.SessionKey); hash != nil {
+		users.InvalidateCookieHash(r.Context(), s.cfg.Cache, hash)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"handle": h})
 }

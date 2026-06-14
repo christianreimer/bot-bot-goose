@@ -3,7 +3,7 @@ package ratelimit
 import "testing"
 
 func TestAllowRejectsInvalidConfig(t *testing.T) {
-	l := &Limiter{}
+	l := &Postgres{}
 	if _, _, err := l.Allow(nil, "k", 0, 1); err == nil {
 		t.Errorf("expected error for capacity=0")
 	}

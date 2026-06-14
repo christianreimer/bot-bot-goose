@@ -2,15 +2,24 @@ package httpx
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/christianreimer/bot-bot-goose/internal/db"
 	"github.com/christianreimer/bot-bot-goose/internal/share"
 	"github.com/christianreimer/bot-bot-goose/internal/users"
 	"github.com/google/uuid"
+)
+
+const (
+	harvestPoolCacheNS  = "harvest"
+	harvestPoolCacheKey = "harvest:eligible:v1"
+	harvestPoolCacheTTL = 60 * time.Second
 )
 
 // Harvest is the Phase-0 collection campaign surface (design doc §3). The
@@ -43,7 +52,7 @@ type harvestCard struct {
 
 func (s *Server) handleHarvest(w http.ResponseWriter, r *http.Request) {
 	u := users.FromContext(r.Context())
-	prompts, err := s.cfg.DB.HarvestDeck(r.Context(), u.ID, harvestDeckSize)
+	prompts, err := s.harvestDeckFor(r.Context(), u.ID)
 	if err != nil {
 		s.cfg.Logger.Error("harvest deck", "err", err)
 		http.Error(w, "deck", http.StatusInternalServerError)
@@ -66,10 +75,11 @@ func (s *Server) handleHarvest(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleHarvestOG renders the static landing PNG. Cacheable forever; the
-// content doesn't depend on the request.
+// handleHarvestOG serves the static landing PNG. Content is generic, so the
+// bytes are precomputed once and shared across requests — see HarvestOGBytes
+// in internal/share/og.go.
 func (s *Server) handleHarvestOG(w http.ResponseWriter, r *http.Request) {
-	png, err := share.RenderHarvestOG()
+	png, err := share.HarvestOGBytes()
 	if err != nil {
 		s.cfg.Logger.Error("render harvest og", "err", err)
 		http.Error(w, "render", http.StatusInternalServerError)
@@ -134,6 +144,73 @@ func (s *Server) handleHarvestSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": id})
+}
+
+// harvestDeckFor builds the per-user deck on top of a cached eligible-prompt
+// pool. The pool ignores the per-user "already answered" filter (so it can
+// be shared across all harvesters) and lives in ValKey for 60s — see plan
+// §2.7 shared-candidate-pool option. The per-user filter is a small
+// indexed SELECT in Postgres.
+func (s *Server) harvestDeckFor(ctx context.Context, userID uuid.UUID) ([]db.HarvestPrompt, error) {
+	pool, err := s.loadHarvestPool(ctx)
+	if err != nil {
+		return nil, err
+	}
+	submittedIDs, err := s.cfg.DB.HarvestSubmittedPromptIDs(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	skip := make(map[uuid.UUID]struct{}, len(submittedIDs))
+	for _, id := range submittedIDs {
+		skip[id] = struct{}{}
+	}
+	eligible := make([]db.HarvestPrompt, 0, len(pool))
+	for _, p := range pool {
+		if _, blocked := skip[p.ID]; blocked {
+			continue
+		}
+		eligible = append(eligible, p)
+	}
+	cryptoShuffle(eligible)
+	if len(eligible) > harvestDeckSize {
+		eligible = eligible[:harvestDeckSize]
+	}
+	return eligible, nil
+}
+
+func (s *Server) loadHarvestPool(ctx context.Context) ([]db.HarvestPrompt, error) {
+	if s.cfg.Cache.Enabled() {
+		if b, ok := s.cfg.Cache.Get(ctx, harvestPoolCacheNS, harvestPoolCacheKey); ok {
+			var out []db.HarvestPrompt
+			if err := json.Unmarshal(b, &out); err == nil {
+				return out, nil
+			}
+		}
+	}
+	pool, err := s.cfg.DB.HarvestEligiblePool(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if s.cfg.Cache.Enabled() {
+		if b, err := json.Marshal(pool); err == nil {
+			s.cfg.Cache.Set(ctx, harvestPoolCacheNS, harvestPoolCacheKey, b, harvestPoolCacheTTL)
+		}
+	}
+	return pool, nil
+}
+
+// cryptoShuffle is a Fisher–Yates shuffle backed by crypto/rand so the deck
+// order leaks nothing about server time or PID. Cost is fine at deck size
+// (the entire eligible pool is ~hundreds at v1).
+func cryptoShuffle(p []db.HarvestPrompt) {
+	for i := len(p) - 1; i > 0; i-- {
+		var b [4]byte
+		if _, err := rand.Read(b[:]); err != nil {
+			panic("rand: " + err.Error())
+		}
+		j := int(binary.BigEndian.Uint32(b[:])) % (i + 1)
+		p[i], p[j] = p[j], p[i]
+	}
 }
 
 func (s *Server) allowHarvestSubmit(ctx context.Context, w http.ResponseWriter, key string, capacity int, refillPerHour float64) bool {

@@ -82,7 +82,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "db", http.StatusInternalServerError)
 		return
 	}
-	streak, _ := s.cfg.DB.StreakFor(ctx, u.ID)
+	streak := s.streakFor(ctx, u.ID)
 
 	// Pull the user's payoff once; the per-decoy share card uses it so
 	// per-decoy totals tie out with the standings.

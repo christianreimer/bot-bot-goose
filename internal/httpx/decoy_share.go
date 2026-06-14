@@ -114,11 +114,11 @@ func (s *Server) handleDecoyShare(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleDecoyShareOG renders the 1200x630 PNG behind the decoy share
-// page's <meta og:image>. Generic content (no per-decoy text in the
-// PNG) so the image can be cached aggressively.
+// handleDecoyShareOG serves the 1200x630 decoy poster behind <meta og:image>.
+// The image is generic across decoys (per-decoy stats live in the page's
+// og:title), so the bytes are precomputed once via DecoyOGBytes.
 func (s *Server) handleDecoyShareOG(w http.ResponseWriter, r *http.Request) {
-	png, err := share.RenderDecoyShareOG()
+	png, err := share.DecoyOGBytes()
 	if err != nil {
 		s.cfg.Logger.Error("render decoy og", "err", err)
 		http.Error(w, "render", http.StatusInternalServerError)

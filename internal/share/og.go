@@ -6,6 +6,8 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"log"
+	"sync"
 
 	"github.com/christianreimer/bot-bot-goose/internal/game"
 	"golang.org/x/image/draw"
@@ -68,27 +70,23 @@ func RenderResultOG(r ResultOG) ([]byte, error) {
 	fillRounded(img, cardRect, 28, colorSurface)
 	strokeRounded(img, cardRect, 28, colorLine)
 
-	// Fonts.
-	face48, err := loadFace(54)
+	// Fonts. Cached per-size; never close them.
+	face48, err := getFace(54)
 	if err != nil {
 		return nil, err
 	}
-	defer face48.Close()
-	face24, err := loadFace(28)
+	face24, err := getFace(28)
 	if err != nil {
 		return nil, err
 	}
-	defer face24.Close()
-	face18, err := loadFace(22)
+	face18, err := getFace(22)
 	if err != nil {
 		return nil, err
 	}
-	defer face18.Close()
-	face14, err := loadFace(18)
+	face14, err := getFace(18)
 	if err != nil {
 		return nil, err
 	}
-	defer face14.Close()
 
 	// Header — brand wordmark + puzzle number. The 🪿 emoji can't be
 	// rendered server-side (no color-emoji font available), so the brand
@@ -158,26 +156,22 @@ func RenderDecoyShareOG() ([]byte, error) {
 
 	fillCircle(img, 180, OGHeight/2, 96, colorHonk)
 
-	face64, err := loadFace(64)
+	face64, err := getFace(64)
 	if err != nil {
 		return nil, err
 	}
-	defer face64.Close()
-	face28, err := loadFace(32)
+	face28, err := getFace(32)
 	if err != nil {
 		return nil, err
 	}
-	defer face28.Close()
-	face18, err := loadFace(22)
+	face18, err := getFace(22)
 	if err != nil {
 		return nil, err
 	}
-	defer face18.Close()
-	face14, err := loadFace(18)
+	face14, err := getFace(18)
 	if err != nil {
 		return nil, err
 	}
-	defer face14.Close()
 
 	drawString(img, face14, "BOT BOT GOOSE · DECOY REPORT", 320, 178, colorHonk)
 	drawString(img, face64, "Could you have caught this?", 320, 274, colorInk)
@@ -192,11 +186,54 @@ func RenderDecoyShareOG() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// HarvestOGBytes / DecoyOGBytes return precomputed PNG bytes for the two
+// static unfurl cards. Built once at first call (or via WarmStaticOG at
+// boot) and shared across requests so the handler skips the ~80ms render
+// path entirely. The slices are never mutated; callers can safely w.Write
+// them directly.
+var (
+	staticOGOnce       sync.Once
+	staticOGHarvestPNG []byte
+	staticOGHarvestErr error
+	staticOGDecoyPNG   []byte
+	staticOGDecoyErr   error
+)
+
+func warmStaticOG() {
+	staticOGOnce.Do(func() {
+		staticOGHarvestPNG, staticOGHarvestErr = renderHarvestOG()
+		staticOGDecoyPNG, staticOGDecoyErr = RenderDecoyShareOG()
+	})
+}
+
+// HarvestOGBytes returns the cached /harvest/og.png bytes. First call pays
+// the render cost; subsequent calls are pointer-cheap.
+func HarvestOGBytes() ([]byte, error) {
+	warmStaticOG()
+	return staticOGHarvestPNG, staticOGHarvestErr
+}
+
+// DecoyOGBytes returns the cached /d/<short>/og.png bytes. The image is
+// identical for every decoy (the per-decoy stats live in the page's
+// og:title); precomputing it kills the only hot inline render on the
+// decoy unfurl path.
+func DecoyOGBytes() ([]byte, error) {
+	warmStaticOG()
+	return staticOGDecoyPNG, staticOGDecoyErr
+}
+
+// WarmStaticOG eagerly precomputes the static cards. Optional — the lazy
+// path in HarvestOGBytes/DecoyOGBytes does the same thing, but calling
+// this at server boot moves the cost off the first user-facing request.
+func WarmStaticOG() { warmStaticOG() }
+
 // RenderHarvestOG produces the static unfurl card for the /harvest landing
-// page. No per-request data — the content is the campaign pitch only, so
-// callers can cache the output indefinitely. Editorial composition: small
-// wordmark, big hook line, the campaign tagline, route footer.
-func RenderHarvestOG() ([]byte, error) {
+// page. The handler should call HarvestOGBytes; this function exists so
+// callers that want a fresh render (e.g. cmd/og-render for previewing in
+// a browser) can bypass the cache.
+func RenderHarvestOG() ([]byte, error) { return renderHarvestOG() }
+
+func renderHarvestOG() ([]byte, error) {
 	img := image.NewRGBA(image.Rect(0, 0, OGWidth, OGHeight))
 	fill(img, img.Bounds(), colorPondDeep)
 
@@ -207,26 +244,22 @@ func RenderHarvestOG() ([]byte, error) {
 	// emoji plays in-app, sized up for the poster context.
 	fillCircle(img, 180, OGHeight/2, 96, colorHonk)
 
-	face64, err := loadFace(72)
+	face64, err := getFace(72)
 	if err != nil {
 		return nil, err
 	}
-	defer face64.Close()
-	face28, err := loadFace(32)
+	face28, err := getFace(32)
 	if err != nil {
 		return nil, err
 	}
-	defer face28.Close()
-	face18, err := loadFace(22)
+	face18, err := getFace(22)
 	if err != nil {
 		return nil, err
 	}
-	defer face18.Close()
-	face14, err := loadFace(18)
+	face14, err := getFace(18)
 	if err != nil {
 		return nil, err
 	}
-	defer face14.Close()
 
 	// Kicker (the "department label" editorial move) and brand.
 	drawString(img, face14, "BOT BOT GOOSE", 320, 178, colorHonk)
@@ -313,46 +346,69 @@ func fillCircle(img *image.RGBA, cx, cy, radius int, c color.Color) {
 
 // ---------------------------------------------------------------------------
 // text — uses gofont/gobold from x/image so we don't bundle our own TTF.
+//
+// Faces are cached forever, one per pixel size. font.Face is safe for
+// concurrent use across goroutines per the x/image/font docs, so a sync.Map
+// is the right primitive. Without the cache, every OG render was paying
+// opentype.Parse + opentype.NewFace four-to-seven times — measurable cost
+// under unfurl-bot scrapes. See plans/launch-capacity §1.4.
 // ---------------------------------------------------------------------------
 
-func loadFace(size float64) (closableFace, error) {
-	f, err := opentype.Parse(gobold.TTF)
-	if err != nil {
-		return closableFace{}, err
+var (
+	parsedFontOnce sync.Once
+	parsedFont     *opentype.Font
+	faceCache      sync.Map // float64 -> font.Face
+)
+
+func parseFont() *opentype.Font {
+	parsedFontOnce.Do(func() {
+		f, err := opentype.Parse(gobold.TTF)
+		if err != nil {
+			log.Panicf("share/og: parse gobold: %v", err)
+		}
+		parsedFont = f
+	})
+	return parsedFont
+}
+
+func getFace(size float64) (font.Face, error) {
+	if cached, ok := faceCache.Load(size); ok {
+		return cached.(font.Face), nil
 	}
-	face, err := opentype.NewFace(f, &opentype.FaceOptions{
+	face, err := opentype.NewFace(parseFont(), &opentype.FaceOptions{
 		Size:    size,
 		DPI:     72,
 		Hinting: font.HintingFull,
 	})
 	if err != nil {
-		return closableFace{}, err
+		return nil, err
 	}
-	return closableFace{Face: face}, nil
+	if actual, loaded := faceCache.LoadOrStore(size, face); loaded {
+		// Lost the race; close our duplicate and use the winner.
+		_ = face.Close()
+		return actual.(font.Face), nil
+	}
+	return face, nil
 }
 
-type closableFace struct{ font.Face }
-
-func (c closableFace) Close() error { return c.Face.Close() }
-
-func drawString(img *image.RGBA, face closableFace, text string, x, y int, c color.Color) {
+func drawString(img *image.RGBA, face font.Face, text string, x, y int, c color.Color) {
 	d := &font.Drawer{
 		Dst:  img,
 		Src:  image.NewUniform(c),
-		Face: face.Face,
+		Face: face,
 		Dot:  fixed.P(x, y),
 	}
 	d.DrawString(text)
 }
 
-func drawStringCentered(img *image.RGBA, face closableFace, text string, cx, y int, c color.Color) {
-	d := &font.Drawer{Face: face.Face}
+func drawStringCentered(img *image.RGBA, face font.Face, text string, cx, y int, c color.Color) {
+	d := &font.Drawer{Face: face}
 	width := d.MeasureString(text).Round()
 	drawString(img, face, text, cx-width/2, y, c)
 }
 
-func drawStringRight(img *image.RGBA, face closableFace, text string, rightX, y int, c color.Color) {
-	d := &font.Drawer{Face: face.Face}
+func drawStringRight(img *image.RGBA, face font.Face, text string, rightX, y int, c color.Color) {
+	d := &font.Drawer{Face: face}
 	width := d.MeasureString(text).Round()
 	drawString(img, face, text, rightX-width, y, c)
 }

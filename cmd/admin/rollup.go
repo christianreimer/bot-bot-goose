@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/christianreimer/bot-bot-goose/internal/cache"
 	"github.com/christianreimer/bot-bot-goose/internal/collective"
 	"github.com/christianreimer/bot-bot-goose/internal/db"
 	"github.com/christianreimer/bot-bot-goose/internal/leaderboard"
@@ -30,9 +31,22 @@ func runRollup(ctx context.Context, log *slog.Logger) error {
 	}
 	log.Info("forger rollup complete", "authors_updated", n)
 
+	// Optional Valkey connection so the rollup can evict the cached
+	// "yesterday humans caught X%" key on write. Without it, the read path
+	// still serves correct numbers — it just falls back to the 10-minute
+	// TTL for the new puzzle's stat to land.
+	c, err := cache.New(ctx, os.Getenv("BBG_VALKEY_URL"), log)
+	if err != nil {
+		log.Warn("valkey dial (rollup)", "err", err)
+		c = nil
+	}
+	if c != nil {
+		defer c.Close()
+	}
+
 	// Freeze yesterday's collective catch rate so the result page + share
 	// card surface a stable, identical-for-everyone number all day.
-	wrote, err := collective.Rollup(ctx, d)
+	wrote, err := collective.Rollup(ctx, d, c)
 	if err != nil {
 		return err
 	}

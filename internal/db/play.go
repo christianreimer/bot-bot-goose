@@ -12,45 +12,26 @@ import (
 // CreateOrGetPlay returns the active play row for (user, puzzle), creating
 // one if missing. The hmacSecret is only set on creation; returned secret is
 // the one bound to whichever row wins the upsert (existing or new).
-func (d *DB) CreateOrGetPlay(ctx context.Context, userID, puzzleID uuid.UUID, hmacSecret []byte) (*Play, bool, error) {
-	tx, err := d.Begin(ctx)
-	if err != nil {
-		return nil, false, err
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-
-	// Try to insert. If it conflicts, fetch.
+//
+// Single round-trip: a DO UPDATE that no-op writes back the existing
+// hmac_secret keeps the row's contents identical while still triggering
+// RETURNING. This replaces the prior BEGIN / INSERT DO NOTHING / SELECT
+// dance (two round-trips on conflict, an explicit tx in every case).
+func (d *DB) CreateOrGetPlay(ctx context.Context, userID, puzzleID uuid.UUID, hmacSecret []byte) (*Play, error) {
 	var p Play
-	created := false
-	err = tx.QueryRow(ctx, `
+	err := d.QueryRow(ctx, `
 		INSERT INTO plays (user_id, daily_puzzle_id, hmac_secret)
 		VALUES ($1, $2, $3)
-		ON CONFLICT (user_id, daily_puzzle_id) DO NOTHING
+		ON CONFLICT (user_id, daily_puzzle_id) DO UPDATE
+		   SET hmac_secret = plays.hmac_secret
 		RETURNING id, user_id, daily_puzzle_id, started_at, completed_at, score_pct, hmac_secret
 	`, userID, puzzleID, hmacSecret).Scan(
 		&p.ID, &p.UserID, &p.DailyPuzzleID, &p.StartedAt, &p.CompletedAt, &p.ScorePct, &p.HMACSecret,
 	)
-	switch {
-	case err == nil:
-		created = true
-	case errors.Is(err, pgx.ErrNoRows):
-		err = tx.QueryRow(ctx, `
-			SELECT id, user_id, daily_puzzle_id, started_at, completed_at, score_pct, hmac_secret
-			  FROM plays WHERE user_id = $1 AND daily_puzzle_id = $2
-		`, userID, puzzleID).Scan(
-			&p.ID, &p.UserID, &p.DailyPuzzleID, &p.StartedAt, &p.CompletedAt, &p.ScorePct, &p.HMACSecret,
-		)
-		if err != nil {
-			return nil, false, err
-		}
-	default:
-		return nil, false, err
+	if err != nil {
+		return nil, err
 	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return nil, false, err
-	}
-	return &p, created, nil
+	return &p, nil
 }
 
 // PublicPlay is the data behind /r/<short> — the public result share page.
@@ -64,6 +45,41 @@ type PublicPlay struct {
 	ScorePct     int
 	Streak       int
 	CompletedAt  time.Time
+}
+
+// PlayOGBundleByShortID resolves a /r/<short> URL just far enough to serve
+// the OG image: returns the play_id and the cached PNG bytes (or nil if
+// the column hasn't been populated for that play). Bypasses the full
+// PublicPlay assembly so the cached path is one indexed SELECT.
+//
+// Returns ErrNotFound for a missing or unfinished play, matching
+// PlayByShortID's semantics so handlers stay uniform.
+func (d *DB) PlayOGBundleByShortID(ctx context.Context, short string) (uuid.UUID, []byte, error) {
+	var id uuid.UUID
+	var png []byte
+	err := d.QueryRow(ctx, `
+		SELECT id, og_png
+		  FROM plays
+		 WHERE replace(id::text, '-', '') LIKE $1 || '%'
+		   AND completed_at IS NOT NULL
+		 LIMIT 1
+	`, short).Scan(&id, &png)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return uuid.Nil, nil, ErrNotFound
+		}
+		return uuid.Nil, nil, err
+	}
+	return id, png, nil
+}
+
+// WritePlayOGPNG stashes the rendered OG bytes on the play row so future
+// requests for /r/<short>/og.png serve from one SELECT instead of running
+// the renderer again. Best-effort: a failure means the next request just
+// re-renders, so callers can log + move on without propagating.
+func (d *DB) WritePlayOGPNG(ctx context.Context, playID uuid.UUID, png []byte) error {
+	_, err := d.Exec(ctx, `UPDATE plays SET og_png = $2 WHERE id = $1`, playID, png)
+	return err
 }
 
 // PlayByShortID resolves a /r/<short> URL to its public result bundle. Only
@@ -142,44 +158,26 @@ func (d *DB) PlayByID(ctx context.Context, id uuid.UUID) (*Play, error) {
 
 // UpsertPlayRound creates or returns the play_round row for (play, index).
 // On creation, slot_permutation is recorded. On a re-fetch we return what's
-// already there. Returns (row, created).
-func (d *DB) UpsertPlayRound(ctx context.Context, playID uuid.UUID, idx int16, perm []int16) (*PlayRound, bool, error) {
-	tx, err := d.Begin(ctx)
-	if err != nil {
-		return nil, false, err
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-
+// already there (no overwrite — the stored permutation is canonical once
+// laid down, so a reload doesn't reshuffle the player's view).
+//
+// Single round-trip: a DO UPDATE writing slot_permutation back to itself
+// is a no-op write that forces RETURNING to fire even on conflict.
+func (d *DB) UpsertPlayRound(ctx context.Context, playID uuid.UUID, idx int16, perm []int16) (*PlayRound, error) {
 	pr := &PlayRound{}
-	created := false
-	err = tx.QueryRow(ctx, `
+	err := d.QueryRow(ctx, `
 		INSERT INTO play_rounds (play_id, round_index, slot_permutation)
 		VALUES ($1, $2, $3)
-		ON CONFLICT (play_id, round_index) DO NOTHING
+		ON CONFLICT (play_id, round_index) DO UPDATE
+		   SET slot_permutation = play_rounds.slot_permutation
 		RETURNING id, play_id, round_index, slot_permutation, hint_used, removed_slot, started_at, committed_at
 	`, playID, idx, perm).Scan(
 		&pr.ID, &pr.PlayID, &pr.RoundIndex, &pr.SlotPermutation, &pr.HintUsed, &pr.RemovedSlot, &pr.StartedAt, &pr.CommittedAt,
 	)
-	switch {
-	case err == nil:
-		created = true
-	case errors.Is(err, pgx.ErrNoRows):
-		err = tx.QueryRow(ctx, `
-			SELECT id, play_id, round_index, slot_permutation, hint_used, removed_slot, started_at, committed_at
-			  FROM play_rounds WHERE play_id = $1 AND round_index = $2
-		`, playID, idx).Scan(
-			&pr.ID, &pr.PlayID, &pr.RoundIndex, &pr.SlotPermutation, &pr.HintUsed, &pr.RemovedSlot, &pr.StartedAt, &pr.CommittedAt,
-		)
-		if err != nil {
-			return nil, false, err
-		}
-	default:
-		return nil, false, err
+	if err != nil {
+		return nil, err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, false, err
-	}
-	return pr, created, nil
+	return pr, nil
 }
 
 // PlayRoundByIndex fetches an existing play_round (no insert).

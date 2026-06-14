@@ -10,6 +10,7 @@ package collective
 import (
 	"context"
 
+	"github.com/christianreimer/bot-bot-goose/internal/cache"
 	"github.com/christianreimer/bot-bot-goose/internal/db"
 )
 
@@ -23,7 +24,12 @@ const MinPlaysFloor = 20
 // puzzle and freezes it. Idempotent: re-running the rollup overwrites the
 // existing row. Returns (false, nil) when there's no qualifying prior
 // puzzle yet (e.g., day 1 of the game) — the caller logs and moves on.
-func Rollup(ctx context.Context, d *db.DB) (bool, error) {
+//
+// On a successful write, the cached "latest stat" key is evicted so the
+// next reader sees the new puzzle's number within seconds, not after the
+// 10-minute TTL window. cache may be nil — the rollup still works, the
+// next read just waits for the natural TTL expiry.
+func Rollup(ctx context.Context, d *db.DB, c *cache.Cache) (bool, error) {
 	s, err := d.ComputePreviousPuzzleCatchRate(ctx)
 	if err != nil {
 		if db.IsNotFound(err) {
@@ -38,5 +44,6 @@ func Rollup(ctx context.Context, d *db.DB) (bool, error) {
 	if err := d.UpsertCollectiveStat(ctx, s); err != nil {
 		return false, err
 	}
+	InvalidateLatest(ctx, c)
 	return true, nil
 }

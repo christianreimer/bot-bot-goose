@@ -1,8 +1,11 @@
 {$BBG_DOMAIN} {
 	encode zstd gzip
 
-	# health endpoints — no caching, no logging noise
-	@health path /healthz /readyz /metrics
+	# health endpoints — no caching, no logging noise. /metrics is
+	# intentionally NOT here: it's served on the bbg container's private
+	# BBG_METRICS_LISTEN listener and only reachable from inside the
+	# droplet. See plans/launch-capacity §1.6.
+	@health path /healthz /readyz
 	handle @health {
 		reverse_proxy bbg:8080
 	}

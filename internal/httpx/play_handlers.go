@@ -17,11 +17,46 @@ import (
 	"github.com/christianreimer/bot-bot-goose/internal/db"
 	"github.com/christianreimer/bot-bot-goose/internal/game"
 	"github.com/christianreimer/bot-bot-goose/internal/play"
+	"github.com/christianreimer/bot-bot-goose/internal/puzzle"
 	"github.com/christianreimer/bot-bot-goose/internal/share"
 	"github.com/christianreimer/bot-bot-goose/internal/users"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
+
+const (
+	streakCacheNS  = "streak"
+	streakCacheTTL = 60 * time.Second
+)
+
+func streakCacheKey(userID uuid.UUID) string { return "streak:" + userID.String() }
+
+// streakFor returns the user's current streak, going through a short-lived
+// ValKey entry that absorbs the burst of post-result page reloads. The
+// SELECT is cheap on its own, but caching it keeps the play loop's hot
+// reads from competing with Postgres for connections. See plan §2.7.
+func (s *Server) streakFor(ctx context.Context, userID uuid.UUID) int {
+	key := streakCacheKey(userID)
+	if s.cfg.Cache.Enabled() {
+		if b, ok := s.cfg.Cache.Get(ctx, streakCacheNS, key); ok {
+			if n, err := strconv.Atoi(string(b)); err == nil {
+				return n
+			}
+		}
+	}
+	n, _ := s.cfg.DB.StreakFor(ctx, userID)
+	if s.cfg.Cache.Enabled() {
+		s.cfg.Cache.Set(ctx, streakCacheNS, key, []byte(strconv.Itoa(n)), streakCacheTTL)
+	}
+	return n
+}
+
+func (s *Server) invalidateStreak(ctx context.Context, userID uuid.UUID) {
+	if !s.cfg.Cache.Enabled() {
+		return
+	}
+	s.cfg.Cache.Del(ctx, streakCacheNS, streakCacheKey(userID))
+}
 
 func randInt(n int) int {
 	if n <= 0 {
@@ -115,7 +150,7 @@ func (s *Server) renderPlayPage(w http.ResponseWriter, r *http.Request, puzzle *
 		// puzzles — pass -1 to omit the line entirely rather than render 0%.
 		humansYesterdayPct := -1
 		hasCollective := false
-		if stat, ok, err := s.cfg.DB.LatestCollectiveStat(r.Context(), collective.MinPlaysFloor); err == nil && ok {
+		if stat, ok, err := collective.Latest(r.Context(), s.cfg.DB, s.cfg.Cache); err == nil && ok {
 			humansYesterdayPct = stat.CatchPct
 			hasCollective = true
 		} else if err != nil {
@@ -182,18 +217,18 @@ func (s *Server) renderPlayPage(w http.ResponseWriter, r *http.Request, puzzle *
 // composePlayState builds the page-load state. It will create a play row +
 // the current round (or return the in-progress one) so the page can render
 // without any further API round-trip.
-func (s *Server) composePlayState(ctx context.Context, u *db.User, puzzle *db.DailyPuzzle, baseURL string) (*playPageState, error) {
+func (s *Server) composePlayState(ctx context.Context, u *db.User, pz *db.DailyPuzzle, baseURL string) (*playPageState, error) {
 	// Get or create play row.
 	hmacSecret := play.NewSecret()
-	playRow, _, err := s.cfg.DB.CreateOrGetPlay(ctx, u.ID, puzzle.ID, hmacSecret)
+	playRow, err := s.cfg.DB.CreateOrGetPlay(ctx, u.ID, pz.ID, hmacSecret)
 	if err != nil {
 		return nil, err
 	}
-	rounds, err := s.cfg.DB.Rounds(ctx, puzzle.ID)
+	bundle, err := puzzle.LoadRoundsBundle(ctx, s.cfg.DB, s.cfg.Cache, pz.ID)
 	if err != nil {
 		return nil, err
 	}
-	if len(rounds) == 0 {
+	if len(bundle.Rounds) == 0 {
 		return nil, errors.New("puzzle has no rounds")
 	}
 
@@ -202,10 +237,10 @@ func (s *Server) composePlayState(ctx context.Context, u *db.User, puzzle *db.Da
 	if err != nil {
 		return nil, err
 	}
-	streak, _ := s.cfg.DB.StreakFor(ctx, u.ID)
+	streak := s.streakFor(ctx, u.ID)
 
 	state := &playPageState{
-		PuzzleNumber: puzzle.PuzzleNumber,
+		PuzzleNumber: pz.PuzzleNumber,
 		PlayID:       playRow.ID.String(),
 		Outcomes:     outcomes,
 		Streak:       streak,
@@ -217,14 +252,15 @@ func (s *Server) composePlayState(ctx context.Context, u *db.User, puzzle *db.Da
 	}
 
 	currentIdx := int16(len(outcomes))
-	if currentIdx >= int16(len(rounds)) {
+	if currentIdx >= int16(len(bundle.Rounds)) {
 		// All rounds played but completed_at not set — should be repaired by
 		// the guess handler. Treat as complete.
 		state.Completed = true
 		return state, nil
 	}
 
-	cr, err := s.openClientRound(ctx, playRow, &rounds[currentIdx])
+	round := bundle.Rounds[currentIdx]
+	cr, err := s.openClientRound(ctx, playRow, &round, bundle.AnswersFor(round.ID))
 	if err != nil {
 		return nil, err
 	}
@@ -234,11 +270,10 @@ func (s *Server) composePlayState(ctx context.Context, u *db.User, puzzle *db.Da
 
 // openClientRound creates-or-returns the play_round at idx and renders the
 // client-facing slot order. Issues a fresh token with the current time.
-func (s *Server) openClientRound(ctx context.Context, playRow *db.Play, round *db.PuzzleRound) (*clientRound, error) {
-	canonical, err := s.cfg.DB.AnswersForRound(ctx, round.ID)
-	if err != nil {
-		return nil, err
-	}
+// `canonical` is the round's answers in canonical order (id ASC), supplied
+// by the caller so we can amortize one Postgres round-trip across multiple
+// rounds — see puzzle.LoadRoundsBundle.
+func (s *Server) openClientRound(ctx context.Context, playRow *db.Play, round *db.PuzzleRound, canonical []db.Answer) (*clientRound, error) {
 	if len(canonical) == 0 {
 		return nil, errors.New("round has no answers")
 	}
@@ -246,7 +281,7 @@ func (s *Server) openClientRound(ctx context.Context, playRow *db.Play, round *d
 	// Generate fresh permutation iff this is the first time we open this round.
 	// Otherwise reuse the stored one (so reloads don't re-shuffle).
 	perm := play.NewPermutation(len(canonical))
-	pr, _, err := s.cfg.DB.UpsertPlayRound(ctx, playRow.ID, round.RoundIndex, perm)
+	pr, err := s.cfg.DB.UpsertPlayRound(ctx, playRow.ID, round.RoundIndex, perm)
 	if err != nil {
 		return nil, err
 	}
@@ -282,24 +317,24 @@ type startResp struct {
 
 func (s *Server) handleAPIPlayStart(w http.ResponseWriter, r *http.Request) {
 	u := users.FromContext(r.Context())
-	puzzle, err := s.cfg.DB.LatestPuzzle(r.Context(), time.Now().UTC())
+	pz, err := s.cfg.DB.LatestPuzzle(r.Context(), time.Now().UTC())
 	if err != nil {
 		writeJSONErr(w, http.StatusServiceUnavailable, "no_puzzle", "no puzzle ready")
 		return
 	}
 	hmacSecret := play.NewSecret()
-	playRow, _, err := s.cfg.DB.CreateOrGetPlay(r.Context(), u.ID, puzzle.ID, hmacSecret)
+	playRow, err := s.cfg.DB.CreateOrGetPlay(r.Context(), u.ID, pz.ID, hmacSecret)
 	if err != nil {
 		writeJSONErr(w, http.StatusInternalServerError, "db", err.Error())
 		return
 	}
-	rounds, err := s.cfg.DB.Rounds(r.Context(), puzzle.ID)
-	if err != nil || len(rounds) == 0 {
+	bundle, err := puzzle.LoadRoundsBundle(r.Context(), s.cfg.DB, s.cfg.Cache, pz.ID)
+	if err != nil || len(bundle.Rounds) == 0 {
 		writeJSONErr(w, http.StatusInternalServerError, "rounds", "no rounds")
 		return
 	}
 	outs, _ := s.cfg.DB.LastOutcomes(r.Context(), playRow.ID)
-	if int(len(outs)) >= len(rounds) {
+	if int(len(outs)) >= len(bundle.Rounds) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"play_id":   playRow.ID,
 			"completed": true,
@@ -307,12 +342,13 @@ func (s *Server) handleAPIPlayStart(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	cr, err := s.openClientRound(r.Context(), playRow, &rounds[len(outs)])
+	round := bundle.Rounds[len(outs)]
+	cr, err := s.openClientRound(r.Context(), playRow, &round, bundle.AnswersFor(round.ID))
 	if err != nil {
 		writeJSONErr(w, http.StatusInternalServerError, "open_round", err.Error())
 		return
 	}
-	streak, _ := s.cfg.DB.StreakFor(r.Context(), u.ID)
+	streak := s.streakFor(r.Context(), u.ID)
 	writeJSON(w, http.StatusOK, startResp{
 		PlayID:   playRow.ID.String(),
 		Round:    cr,
@@ -348,7 +384,7 @@ func (s *Server) handleAPIHint(w http.ResponseWriter, r *http.Request) {
 
 	// Step 1: identify the play behind this token (the token IS the play_id).
 	// We need the play's HMAC secret to verify.
-	playRow, prRow, qRound, perm, canonical, herr := s.loadVerified(ctx, u, body.Token, int16(n), now)
+	playRow, prRow, qRound, perm, canonical, _, herr := s.loadVerified(ctx, u, body.Token, int16(n), now)
 	if herr != nil {
 		writeJSONErr(w, herr.status, herr.code, herr.msg)
 		return
@@ -419,7 +455,7 @@ func (s *Server) handleAPIGuess(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	now := time.Now()
 
-	playRow, prRow, qRound, perm, canonical, herr := s.loadVerified(ctx, u, body.Token, int16(n), now)
+	playRow, prRow, qRound, perm, canonical, bundle, herr := s.loadVerified(ctx, u, body.Token, int16(n), now)
 	if herr != nil {
 		writeJSONErr(w, herr.status, herr.code, herr.msg)
 		return
@@ -469,12 +505,7 @@ func (s *Server) handleAPIGuess(w http.ResponseWriter, r *http.Request) {
 		s.cfg.Logger.Info("suspicious_fast_guess", "play", playRow.ID, "round", n, "delta_ms", now.Sub(prRow.StartedAt).Milliseconds())
 	}
 
-	rounds, err := s.cfg.DB.Rounds(ctx, playRow.DailyPuzzleID)
-	if err != nil {
-		writeJSONErr(w, http.StatusInternalServerError, "rounds", err.Error())
-		return
-	}
-
+	rounds := bundle.Rounds
 	outs, _ := s.cfg.DB.LastOutcomes(ctx, playRow.ID)
 
 	resp := guessResp{
@@ -488,12 +519,24 @@ func (s *Server) handleAPIGuess(w http.ResponseWriter, r *http.Request) {
 		pct := game.ScorePct(outs)
 		if err := s.cfg.DB.CompletePlay(ctx, playRow.ID, int16(pct), now); err != nil {
 			s.cfg.Logger.Warn("complete_play", "err", err)
+		} else {
+			// CompletePlay bumped streaks; drop the cached value so the next
+			// /me / result-page read pulls the new number.
+			s.invalidateStreak(ctx, u.ID)
+			// Pre-render the result OG card in the background so the first
+			// /r/<short>/og.png hit (typically a Twitter/Slack unfurl bot
+			// seconds later) serves bytes from a SELECT instead of paying
+			// the ~80ms render cost on the hot scrape path. Detached from
+			// the request context — the player has already gotten their
+			// response. See plans/launch-capacity §1.4.
+			s.persistResultOGAsync(playRow.ID, playRow.DailyPuzzleID, u.ID, outs)
 		}
 		resp.Completed = true
 		resp.ScorePct = pct
 	} else {
 		// Open the next round.
-		next, err := s.openClientRound(ctx, playRow, &rounds[len(outs)])
+		nextRound := rounds[len(outs)]
+		next, err := s.openClientRound(ctx, playRow, &nextRound, bundle.AnswersFor(nextRound.ID))
 		if err != nil {
 			writeJSONErr(w, http.StatusInternalServerError, "next_round", err.Error())
 			return
@@ -547,7 +590,7 @@ func (s *Server) handleAPIRealest(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	now := time.Now()
 
-	_, prRow, _, perm, canonical, herr := s.loadVerified(ctx, u, body.Token, int16(n), now)
+	_, prRow, _, perm, canonical, _, herr := s.loadVerified(ctx, u, body.Token, int16(n), now)
 	if herr != nil {
 		writeJSONErr(w, herr.status, herr.code, herr.msg)
 		return
@@ -589,66 +632,98 @@ type httpErr struct {
 
 // loadVerified parses the play token, looks up the play (verifying user
 // ownership), reloads the round + canonical answers, and verifies the
-// token's perm hash matches what's in the DB. Any failure returns a
-// uniformly-shaped httpErr so the handler can early-return cleanly.
-func (s *Server) loadVerified(ctx context.Context, u *db.User, rawToken string, roundIdx int16, now time.Time) (*db.Play, *db.PlayRound, *db.PuzzleRound, []int16, []db.Answer, *httpErr) {
-	// Token's play_id is needed before we can read its secret. Parse twice:
-	// once raw, once verified. Cheap because the first parse only splits.
-	raw := struct {
-		PlayID uuid.UUID
-	}{}
-	// Use a no-op verify (zero secret) to pull the play_id out — the real
-	// verify happens below. We re-implement the structural parse here to
-	// avoid exposing a "trust the token's claims" API on the play package.
+// token's perm hash matches what's in the DB. The rounds bundle is
+// returned so callers can also reach sibling-round data (e.g. opening
+// the next round after a guess) without a second cache lookup.
+//
+// Any failure returns a uniformly-shaped httpErr so the handler can
+// early-return cleanly.
+func (s *Server) loadVerified(ctx context.Context, u *db.User, rawToken string, roundIdx int16, now time.Time) (*db.Play, *db.PlayRound, *db.PuzzleRound, []int16, []db.Answer, *puzzle.RoundsBundle, *httpErr) {
 	parts := splitFirstFive(rawToken)
 	if parts == nil {
-		return nil, nil, nil, nil, nil, &httpErr{http.StatusBadRequest, "bad_token", ""}
+		return nil, nil, nil, nil, nil, nil, &httpErr{http.StatusBadRequest, "bad_token", ""}
 	}
 	pid, err := uuid.Parse(parts[0])
 	if err != nil {
-		return nil, nil, nil, nil, nil, &httpErr{http.StatusBadRequest, "bad_token_play_id", ""}
+		return nil, nil, nil, nil, nil, nil, &httpErr{http.StatusBadRequest, "bad_token_play_id", ""}
 	}
-	raw.PlayID = pid
 
-	playRow, err := s.cfg.DB.PlayByID(ctx, raw.PlayID)
+	playRow, err := s.cfg.DB.PlayByID(ctx, pid)
 	if err != nil {
-		return nil, nil, nil, nil, nil, &httpErr{http.StatusBadRequest, "play_missing", ""}
+		return nil, nil, nil, nil, nil, nil, &httpErr{http.StatusBadRequest, "play_missing", ""}
 	}
 	if playRow.UserID != u.ID {
 		// Cross-play submission attempt.
-		return nil, nil, nil, nil, nil, &httpErr{http.StatusForbidden, "play_owner_mismatch", ""}
+		return nil, nil, nil, nil, nil, nil, &httpErr{http.StatusForbidden, "play_owner_mismatch", ""}
 	}
 
 	tok, err := play.Verify(playRow.HMACSecret, rawToken, now)
 	if err != nil {
-		return nil, nil, nil, nil, nil, &httpErr{http.StatusUnauthorized, "token_invalid", err.Error()}
+		return nil, nil, nil, nil, nil, nil, &httpErr{http.StatusUnauthorized, "token_invalid", err.Error()}
 	}
 	if tok.RoundIndex != roundIdx {
-		return nil, nil, nil, nil, nil, &httpErr{http.StatusBadRequest, "round_mismatch", ""}
+		return nil, nil, nil, nil, nil, nil, &httpErr{http.StatusBadRequest, "round_mismatch", ""}
 	}
 
 	pr, err := s.cfg.DB.PlayRoundByIndex(ctx, playRow.ID, roundIdx)
 	if err != nil {
-		return nil, nil, nil, nil, nil, &httpErr{http.StatusBadRequest, "round_missing", ""}
+		return nil, nil, nil, nil, nil, nil, &httpErr{http.StatusBadRequest, "round_missing", ""}
 	}
 	wantHash := play.PermutationHash(pr.SlotPermutation)
 	if !bytesEqual(wantHash, tok.PermHash) {
 		// Stored perm changed under the token — should never happen, but
 		// fail closed.
-		return nil, nil, nil, nil, nil, &httpErr{http.StatusConflict, "perm_drift", ""}
+		return nil, nil, nil, nil, nil, nil, &httpErr{http.StatusConflict, "perm_drift", ""}
 	}
 
-	// Resolve canonical answers.
-	rounds, err := s.cfg.DB.Rounds(ctx, playRow.DailyPuzzleID)
-	if err != nil || int(roundIdx) >= len(rounds) {
-		return nil, nil, nil, nil, nil, &httpErr{http.StatusInternalServerError, "rounds_missing", ""}
+	// Resolve rounds + canonical answers through the rounds cache. This is
+	// the hottest read of the play loop; see plan §2.6.
+	bundle, err := puzzle.LoadRoundsBundle(ctx, s.cfg.DB, s.cfg.Cache, playRow.DailyPuzzleID)
+	if err != nil || int(roundIdx) >= len(bundle.Rounds) {
+		return nil, nil, nil, nil, nil, nil, &httpErr{http.StatusInternalServerError, "rounds_missing", ""}
 	}
-	canonical, err := s.cfg.DB.AnswersForRound(ctx, rounds[roundIdx].ID)
-	if err != nil {
-		return nil, nil, nil, nil, nil, &httpErr{http.StatusInternalServerError, "answers_missing", ""}
+	qRound := bundle.Rounds[roundIdx]
+	canonical := bundle.AnswersFor(qRound.ID)
+	if len(canonical) == 0 {
+		return nil, nil, nil, nil, nil, nil, &httpErr{http.StatusInternalServerError, "answers_missing", ""}
 	}
-	qRound := rounds[roundIdx]
-	return playRow, pr, &qRound, pr.SlotPermutation, canonical, nil
+	return playRow, pr, &qRound, pr.SlotPermutation, canonical, bundle, nil
+}
+
+// persistResultOGAsync renders the result OG card and stashes the bytes in
+// plays.og_png so handleResultShareOG can later serve from a SELECT. Runs
+// detached from the request context so a player's guess response never
+// waits on png.Encode; bounded by its own 15s timeout to keep a runaway
+// goroutine from outliving a shutdown.
+func (s *Server) persistResultOGAsync(playID, puzzleID, userID uuid.UUID, outs []game.Outcome) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		pz, err := s.cfg.DB.PuzzleByID(ctx, puzzleID)
+		if err != nil {
+			s.cfg.Logger.Warn("og persist puzzle", "play", playID, "err", err)
+			return
+		}
+		streak := s.streakFor(ctx, userID)
+		humansYesterdayPct := -1
+		if stat, ok, err := collective.Latest(ctx, s.cfg.DB, s.cfg.Cache); err == nil && ok {
+			humansYesterdayPct = stat.CatchPct
+		}
+		png, err := share.RenderResultOG(share.ResultOG{
+			PuzzleNumber:       pz.PuzzleNumber,
+			Outcomes:           outs,
+			Streak:             streak,
+			HumansYesterdayPct: humansYesterdayPct,
+		})
+		if err != nil {
+			s.cfg.Logger.Warn("og persist render", "play", playID, "err", err)
+			return
+		}
+		if err := s.cfg.DB.WritePlayOGPNG(ctx, playID, png); err != nil {
+			s.cfg.Logger.Warn("og persist write", "play", playID, "err", err)
+		}
+	}()
 }
 
 func splitFirstFive(s string) []string {

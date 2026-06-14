@@ -12,13 +12,66 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/christianreimer/bot-bot-goose/internal/cache"
 	"github.com/christianreimer/bot-bot-goose/internal/db"
 )
+
+// userCacheTTL is the rolling lifetime of a cached UserByCookieHash blob.
+// The Valkey cache absorbs the hot per-request SELECT during launch traffic
+// while staying short enough that handle / role changes propagate within
+// minutes. See plans/launch-capacity §2.3.
+const userCacheTTL = 5 * time.Minute
+
+// cacheKeyForCookieHash is "u:<hex>" — the namespace prefix the plan calls
+// out so an operator running `redis-cli KEYS 'u:*'` can read session
+// pressure at a glance.
+func cacheKeyForCookieHash(hash []byte) string {
+	return "u:" + hex.EncodeToString(hash)
+}
+
+func loadUserFromCache(ctx context.Context, c *cache.Cache, hash []byte) *db.User {
+	if c == nil {
+		return nil
+	}
+	b, ok := c.Get(ctx, "users", cacheKeyForCookieHash(hash))
+	if !ok {
+		return nil
+	}
+	var u db.User
+	if err := json.Unmarshal(b, &u); err != nil {
+		return nil
+	}
+	return &u
+}
+
+func storeUserInCache(ctx context.Context, c *cache.Cache, hash []byte, u *db.User) {
+	if c == nil || u == nil {
+		return
+	}
+	b, err := json.Marshal(u)
+	if err != nil {
+		return
+	}
+	c.Set(ctx, "users", cacheKeyForCookieHash(hash), b, userCacheTTL)
+}
+
+// InvalidateCookieHash is the public hook handlers call after a state
+// change that should not wait for the TTL — logout, handle change.
+// Other mutations (logout-all, SetUserRole) can't enumerate every
+// session's hash; for those the TTL is the bound. See plan §2.3.
+func InvalidateCookieHash(ctx context.Context, c *cache.Cache, hash []byte) {
+	if c == nil || hash == nil {
+		return
+	}
+	c.Del(ctx, "users", cacheKeyForCookieHash(hash))
+}
 
 const (
 	// CookieName is the device-cookie's name. v1 reflects the format below.
@@ -41,13 +94,18 @@ func FromContext(ctx context.Context) *db.User {
 // Middleware resolves or mints a device cookie on every request. It is
 // applied broadly so the play loop can trust a user is present; admin /
 // auth-only handlers add their own role checks on top.
-func Middleware(d *db.DB, secret []byte, secureCookie bool) func(http.Handler) http.Handler {
+//
+// c may be nil — when it is, the Valkey path is skipped and every lookup
+// goes straight to Postgres. This matches the launch-capacity plan's
+// universal "miss → Postgres" rule and keeps dev/test setups working
+// without Valkey running.
+func Middleware(d *db.DB, c *cache.Cache, secret []byte, secureCookie bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
 
 			raw, _ := readCookie(r)
-			user, cleartext, err := resolveOrMint(ctx, d, secret, raw, r.UserAgent())
+			user, cleartext, err := resolveOrMint(ctx, d, c, secret, raw, r.UserAgent())
 			if err != nil {
 				http.Error(w, "session error", http.StatusInternalServerError)
 				return
@@ -67,12 +125,16 @@ func Middleware(d *db.DB, secret []byte, secureCookie bool) func(http.Handler) h
 // creates a brand-new anonymous user + cookie if the presented one is
 // missing/invalid. Returns the resolved user and the (possibly new)
 // cleartext cookie value to set on the response.
-func resolveOrMint(ctx context.Context, d *db.DB, secret []byte, presented, ua string) (*db.User, string, error) {
+func resolveOrMint(ctx context.Context, d *db.DB, c *cache.Cache, secret []byte, presented, ua string) (*db.User, string, error) {
 	if presented != "" {
 		cleartext, ok := unwrapCookie(secret, presented)
 		if ok {
 			hash := hashCookie(cleartext)
+			if u := loadUserFromCache(ctx, c, hash); u != nil {
+				return u, presented, nil
+			}
 			if u, err := d.UserByCookieHash(ctx, hash); err == nil {
+				storeUserInCache(ctx, c, hash, u)
 				return u, presented, nil
 			} else if !errors.Is(err, db.ErrNotFound) {
 				return nil, "", err
@@ -92,7 +154,9 @@ func resolveOrMint(ctx context.Context, d *db.DB, secret []byte, presented, ua s
 		return nil, "", err
 	}
 	signed := wrapCookie(secret, cleartext)
-	return &db.User{ID: userID, Handle: &handle, Role: "player", SpotterELO: 1200}, signed, nil
+	u := &db.User{ID: userID, Handle: &handle, Role: "player", SpotterELO: 1200}
+	storeUserInCache(ctx, c, hash, u)
+	return u, signed, nil
 }
 
 // ResolveOnly looks up the user behind a presented device cookie if one
@@ -101,7 +165,7 @@ func resolveOrMint(ctx context.Context, d *db.DB, secret []byte, presented, ua s
 // session middleware. Returns (nil, nil) when no user can be resolved
 // without writing. Used by the privacy page so that a reader who's
 // never played gets no cookie set just for visiting.
-func ResolveOnly(ctx context.Context, d *db.DB, secret []byte, r *http.Request) (*db.User, error) {
+func ResolveOnly(ctx context.Context, d *db.DB, c *cache.Cache, secret []byte, r *http.Request) (*db.User, error) {
 	raw, _ := readCookie(r)
 	if raw == "" {
 		return nil, nil
@@ -111,6 +175,9 @@ func ResolveOnly(ctx context.Context, d *db.DB, secret []byte, r *http.Request) 
 		return nil, nil
 	}
 	hash := hashCookie(cleartext)
+	if u := loadUserFromCache(ctx, c, hash); u != nil {
+		return u, nil
+	}
 	u, err := d.UserByCookieHash(ctx, hash)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
@@ -118,6 +185,7 @@ func ResolveOnly(ctx context.Context, d *db.DB, secret []byte, r *http.Request) 
 		}
 		return nil, err
 	}
+	storeUserInCache(ctx, c, hash, u)
 	return u, nil
 }
 

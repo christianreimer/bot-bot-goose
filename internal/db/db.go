@@ -10,6 +10,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -20,13 +22,28 @@ type DB struct {
 	*pgxpool.Pool
 }
 
+// Pool sizing for the launch. Defaults are the values the launch-capacity
+// plan §1.2 calls out; they're overridable via env so a managed-Postgres
+// plan with a lower connection ceiling can dial down without a rebuild.
+// MinConns warms the pool so the first request after a quiet period doesn't
+// pay a dial-cost; MaxConnIdleTime trims connections that have been parked
+// too long.
+const (
+	defaultMaxConns        = 64
+	defaultMinConns        = 8
+	defaultMaxConnLifetime = time.Hour
+	defaultMaxConnIdleTime = 10 * time.Minute
+)
+
 func Open(ctx context.Context, url string) (*DB, error) {
 	cfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
 		return nil, fmt.Errorf("parse db url: %w", err)
 	}
-	cfg.MaxConns = 16
-	cfg.MaxConnLifetime = time.Hour
+	cfg.MaxConns = envInt32("BBG_DB_MAX_CONNS", defaultMaxConns)
+	cfg.MinConns = envInt32("BBG_DB_MIN_CONNS", defaultMinConns)
+	cfg.MaxConnLifetime = defaultMaxConnLifetime
+	cfg.MaxConnIdleTime = defaultMaxConnIdleTime
 	cfg.HealthCheckPeriod = 30 * time.Second
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
@@ -40,6 +57,18 @@ func Open(ctx context.Context, url string) (*DB, error) {
 		return nil, fmt.Errorf("ping postgres: %w", err)
 	}
 	return &DB{pool}, nil
+}
+
+func envInt32(key string, def int32) int32 {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return def
+	}
+	return int32(n)
 }
 
 // ErrNotFound is returned by query helpers when zero rows are returned. It
