@@ -1,0 +1,175 @@
+# DigitalOcean App Platform spec for bbg.
+#
+# This file is a TEMPLATE. To use it:
+#   1. Replace REPLACE_ME placeholders with your values.
+#   2. Either commit it (so DO can read it on push) or paste its contents
+#      into the App Spec editor in the DO dashboard.
+#   3. Set the SECRET env vars via the dashboard so they're encrypted
+#      (the YAML carries the names + types, not the values).
+#
+# The bbg binary self-migrates on boot (cmd/server reads the embedded
+# db/migrations/ tree and calls goose.UpContext), so there is no separate
+# pre-deploy job. First deploy on a fresh managed Postgres applies the
+# schema; subsequent deploys are no-ops on the migrations side.
+
+name: bbg
+
+services:
+  - name: bbg
+    dockerfile_path: deploy/Dockerfile
+    source_dir: /
+    github:
+      repo: REPLACE_ME/botbotgoose          # e.g. christianreimer/botbotgoose
+      branch: main
+      deploy_on_push: true
+
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: basic-xs            # bump to basic-s / professional-* under load
+
+    health_check:
+      http_path: /healthz
+      initial_delay_seconds: 30
+      period_seconds: 10
+      timeout_seconds: 3
+      failure_threshold: 3
+
+    envs:
+      # ---- required --------------------------------------------------------
+
+      # Public-facing URL DO assigns this app. After the first deploy DO
+      # gives you something like `bbg-xxxxx.ondigitalocean.app`; set that,
+      # then later switch to your custom domain after DNS is wired up.
+      - key: BBG_BASE_URL
+        scope: RUN_TIME
+        value: https://REPLACE_ME.ondigitalocean.app
+
+      # 32+ random bytes, hex-encoded. Generate with: openssl rand -hex 32.
+      # Set as a SECRET in the dashboard — do NOT commit the actual value.
+      - key: BBG_SESSION_KEY
+        scope: RUN_TIME
+        type: SECRET
+        value: REPLACE_ME
+
+      # Managed Postgres connection URI. Copy from your DO Managed Postgres
+      # cluster's "Connection details" → URI. Use the CONNECTION POOL URI
+      # (PgBouncer) not the direct cluster URI — see plans/launch-capacity.md
+      # §5.2. The cluster's trusted sources must include this app.
+      - key: BBG_DB_URL
+        scope: RUN_TIME
+        type: SECRET
+        value: REPLACE_ME
+
+      # Managed Caching (Valkey) connection URI. Copy from the DO Managed
+      # Caching dashboard. Uses rediss:// (TLS) — the bbg cache layer
+      # autodetects from the scheme. Optional: leave unset to fall back to
+      # direct Postgres for every cache layer.
+      - key: BBG_VALKEY_URL
+        scope: RUN_TIME
+        type: SECRET
+        value: REPLACE_ME
+
+      # ---- magic-link email ------------------------------------------------
+
+      # "resend" is the supported production sender. "log" prints links to
+      # stdout (useful only for first-boot smoke tests on a fresh app).
+      - key: BBG_EMAIL_PROVIDER
+        scope: RUN_TIME
+        value: resend
+
+      - key: BBG_RESEND_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+        value: REPLACE_ME
+
+      - key: BBG_EMAIL_FROM
+        scope: RUN_TIME
+        value: Bot Bot Goose <REPLACE_ME@yourdomain.com>
+
+      # ---- web push (VAPID) ------------------------------------------------
+      # Generate with: bbg-admin vapid-gen. Both values are required so the
+      # service worker can subscribe.
+      - key: BBG_VAPID_PUBLIC
+        scope: RUN_TIME
+        value: REPLACE_ME
+
+      - key: BBG_VAPID_PRIVATE
+        scope: RUN_TIME
+        type: SECRET
+        value: REPLACE_ME
+
+      # ---- optional --------------------------------------------------------
+
+      # Used by `make bot-gen` and the bot-candidates CLI only. Never read
+      # by the live server; safe to omit if you compose bots locally.
+      - key: BBG_ANTHROPIC_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+        value: ""
+
+      # Pool sizing. Defaults in code are 64/8. Lower these if the managed
+      # Postgres plan caps connections (e.g. Basic 2GB plan: ~22 conns).
+      # - key: BBG_DB_MAX_CONNS
+      #   value: "20"
+      # - key: BBG_DB_MIN_CONNS
+      #   value: "4"
+
+# ---- scheduled jobs ----------------------------------------------------------
+# DO App Platform supports cron jobs via the same Dockerfile-built image
+# under a different run_command. The bbg image ships every CLI binary,
+# so no second image to maintain.
+
+jobs:
+  # Composes the next daily puzzle. The full deck pipeline (prompts +
+  # bot candidates + decoys) must already be moderated and ready in
+  # Postgres; this job just stitches them into the day's row.
+  - name: puzzle-build
+    kind: CRON
+    schedule: "0 12 * * *"   # 12:00 UTC daily — bake tomorrow's puzzle
+    dockerfile_path: deploy/Dockerfile
+    source_dir: /
+    run_command: bbg-puzzle-build
+    instance_size_slug: basic-xxs
+    envs:
+      - key: BBG_DB_URL
+        scope: RUN_TIME
+        type: SECRET
+        value: REPLACE_ME
+
+  # Late-night alarm: exits 1 if tomorrow's puzzle wasn't built. Pair
+  # this with DO Monitoring → "job failed" alert so the alarm reaches
+  # you on time.
+  - name: puzzle-check
+    kind: CRON
+    schedule: "0 22 * * *"   # 22:00 UTC daily
+    dockerfile_path: deploy/Dockerfile
+    source_dir: /
+    run_command: bbg-puzzle-build --check
+    instance_size_slug: basic-xxs
+    envs:
+      - key: BBG_DB_URL
+        scope: RUN_TIME
+        type: SECRET
+        value: REPLACE_ME
+
+  # Rebuilds the Originals leaderboard + freezes yesterday's collective
+  # catch rate. Cheap, run nightly.
+  - name: rollup
+    kind: CRON
+    schedule: "30 1 * * *"   # 01:30 UTC — well after midnight, before the
+                             # daily share unfurl traffic builds.
+    dockerfile_path: deploy/Dockerfile
+    source_dir: /
+    run_command: bbg-admin rollup
+    instance_size_slug: basic-xxs
+    envs:
+      - key: BBG_DB_URL
+        scope: RUN_TIME
+        type: SECRET
+        value: REPLACE_ME
+      # Rollup invalidates the cached "Latest collective stat" key on
+      # write so the next read sees the new puzzle's number immediately.
+      - key: BBG_VALKEY_URL
+        scope: RUN_TIME
+        type: SECRET
+        value: REPLACE_ME
