@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -126,7 +127,12 @@ func main() {
 		// BBG_PRELAUNCH_MODE swaps the front page (and every URL that isn't
 		// /prelaunch, /privacy, or system routes) for an on-brand "coming
 		// soon" placeholder. Flip off at launch.
-		PrelaunchMode: os.Getenv("BBG_PRELAUNCH_MODE") != "",
+		//
+		// Accepts the standard strconv.ParseBool set: 1, t, T, TRUE, true,
+		// True → on; 0, f, F, FALSE, false, False → off; empty/unset → off.
+		// Anything that doesn't parse is treated as off (conservative: a
+		// typo'd value shouldn't hide the site).
+		PrelaunchMode: parseBoolEnv("BBG_PRELAUNCH_MODE"),
 	})
 	if err != nil {
 		log.Error("build server", "err", err)
@@ -152,6 +158,23 @@ func envDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// parseBoolEnv reads a boolean env var. Accepts the strconv.ParseBool set
+// ("1", "t", "T", "TRUE", "true", "True" → true; "0", "f", "F", "FALSE",
+// "false", "False" → false). Unset, empty, or any value that doesn't parse
+// returns false. The unparseable-as-false rule is intentional: a typo
+// shouldn't put the app into prelaunch mode and hide the game.
+func parseBoolEnv(key string) bool {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return false
+	}
+	b, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false
+	}
+	return b
 }
 
 // applyMigrations opens a short-lived database/sql connection (goose's
