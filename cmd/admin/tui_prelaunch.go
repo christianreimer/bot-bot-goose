@@ -358,6 +358,13 @@ func (m tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) handleKeyPrompts(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// A reasonable page-step for full-page jumps. We don't have the rendered
+	// viewport height in scope here so approximate from the terminal height
+	// minus chrome — matches what viewPrompts uses to compute its window.
+	pageStep := m.height - 9
+	if pageStep < 5 {
+		pageStep = 10
+	}
 	switch msg.String() {
 	case "down", "j":
 		if m.promptCursor < len(m.prompts)-1 {
@@ -367,6 +374,18 @@ func (m tuiModel) handleKeyPrompts(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "up", "k":
 		if m.promptCursor > 0 {
 			m.promptCursor--
+		}
+		return m, nil
+	case "pgdown", "ctrl+f", "f":
+		m.promptCursor += pageStep
+		if m.promptCursor > len(m.prompts)-1 {
+			m.promptCursor = len(m.prompts) - 1
+		}
+		return m, nil
+	case "pgup", "ctrl+b", "b":
+		m.promptCursor -= pageStep
+		if m.promptCursor < 0 {
+			m.promptCursor = 0
 		}
 		return m, nil
 	case "g", "home":
@@ -491,19 +510,82 @@ func (m tuiModel) viewPrompts() string {
 		wPrompt = 20
 	}
 
+	// Compute the visible window. The chrome (header line + rule + blank +
+	// footer rule + footer line) takes ~6 rows. Reserve 1 more for the
+	// table header and 2 for scroll indicators. Anything left is the
+	// scrollable list area.
+	const chrome = 6 + 1 + 2 // header+rule+blank, table-header, scroll-indicators
+	rowsAvailable := m.height - chrome
+	if rowsAvailable < 5 {
+		// Either height isn't known yet (WindowSizeMsg pending) or the
+		// terminal is tiny. Render everything and let the operator scroll
+		// their terminal — degrading gracefully beats clipping silently.
+		rowsAvailable = len(m.prompts)
+	}
+
+	// Cursor-following window: keep the selected row in view. If the
+	// cursor drifts off the bottom, scroll just enough to keep it; same
+	// for the top. Center-on-cursor would be smoother but the jitter is
+	// distracting during fast j/k navigation.
+	total := len(m.prompts)
+	start := 0
+	if total > rowsAvailable {
+		// Keep a 1-row buffer above and below where possible.
+		if m.promptCursor < rowsAvailable-1 {
+			start = 0
+		} else if m.promptCursor >= total-1 {
+			start = total - rowsAvailable
+		} else {
+			// Place cursor roughly in the middle of the viewport.
+			start = m.promptCursor - rowsAvailable/2
+			if start < 0 {
+				start = 0
+			}
+			if start+rowsAvailable > total {
+				start = total - rowsAvailable
+			}
+		}
+	}
+	end := start + rowsAvailable
+	if end > total {
+		end = total
+	}
+
 	head := fmt.Sprintf("%*s %*s %*s %*s  %s",
 		wPending, "PENDING", wIng, "INGESTED", wRej, "REJECTED", wPool, "POOL", "PROMPT")
-	rows := []string{styleKick.Render(head)}
-	for i, p := range m.prompts {
+	out := []string{styleKick.Render(head)}
+
+	above := start
+	if above > 0 {
+		out = append(out, styleMuted.Render(fmt.Sprintf("↑ %d more above", above)))
+	} else {
+		out = append(out, "")
+	}
+
+	for i := start; i < end; i++ {
+		p := m.prompts[i]
 		text := truncateW(p.PromptText, wPrompt)
 		row := fmt.Sprintf("%*d %*d %*d %*d  %s",
 			wPending, p.Pending, wIng, p.Ingested, wRej, p.Rejected, wPool, p.ApprovedDec, text)
 		if i == m.promptCursor {
 			row = styleSelected.Render(row)
 		}
-		rows = append(rows, row)
+		out = append(out, row)
 	}
-	return strings.Join(rows, "\n")
+
+	below := total - end
+	if below > 0 {
+		out = append(out, styleMuted.Render(fmt.Sprintf("↓ %d more below", below)))
+	} else {
+		out = append(out, "")
+	}
+
+	// Position indicator on the right of the table header isn't possible
+	// without re-laying it out; instead show "row X of N" inline above.
+	pos := styleMuted.Render(fmt.Sprintf("row %d of %d", m.promptCursor+1, total))
+	out = append([]string{pos}, out...)
+
+	return strings.Join(out, "\n")
 }
 
 func (m tuiModel) viewReview() string {
@@ -561,7 +643,7 @@ func (m tuiModel) footer() string {
 	var keys string
 	switch m.screen {
 	case screenPrompts:
-		keys = "↑↓ navigate · enter open · r refresh · q quit"
+		keys = "↑↓ navigate · f/b page · g/G top/bottom · enter open · r refresh · q quit"
 	case screenReview:
 		if m.noteOpen {
 			keys = "type note · enter confirm · esc cancel"
