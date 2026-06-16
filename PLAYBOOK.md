@@ -12,10 +12,11 @@ deeper procedural context (triage rhythm, "AI-shaped tells", etc.) see
 the `bbg` Claude skill at `.claude/skills/bbg/SKILL.md`.
 
 ```
-ADMIN=/Users/creimer/code/botbotgoose/bin/bbg-admin
+REPO=/path/to/your/botbotgoose/checkout
+ADMIN=$REPO/bin/bbg-admin
 ```
 
-If the binary is stale: `make -C /Users/creimer/code/botbotgoose bin/bbg-admin`.
+If the binary is stale: `make -C $REPO bin/bbg-admin`.
 
 ---
 
@@ -38,20 +39,20 @@ postgres://bbg:bbg@localhost:5432/bbg?sslmode=disable
 3. Export:
 
 ```
-export BBG_DB_URL='postgresql://doadmin:PWD@db-pgsql-bbg-do-user-xxxxx.h.db.ondigitalocean.com:25061/bbg-pg-pool?sslmode=require'
+export BBG_DB_URL='postgresql://<db-user>:<password>@<pg-host>.h.db.ondigitalocean.com:25061/bbg-pg-pool?sslmode=require'
 ```
 
 Anything that writes to `moderation_reviews` also needs a reviewer
 identity:
 
 ```
-export BBG_REVIEWER_EMAIL=creimer@mudbox.org
+export BBG_REVIEWER_EMAIL=you@example.com
 ```
 
 If that email isn't yet a registered reviewer, promote it once:
 
 ```
-"$ADMIN" promote --email creimer@mudbox.org --role reviewer
+"$ADMIN" promote --email you@example.com --role reviewer
 ```
 
 When pointed at a non-local DB, **always confirm with the user before
@@ -170,7 +171,7 @@ composing.
 ### Step 3 — refill bot pool if any prompt has zero approved bots
 
 ```
-BBG_ANTHROPIC_API_KEY=... /Users/creimer/code/botbotgoose/bin/bbg-bot-candidates \
+BBG_ANTHROPIC_API_KEY=... $REPO/bin/bbg-bot-candidates \
   --prompt "<exact prompt text>" --n 4
 ```
 
