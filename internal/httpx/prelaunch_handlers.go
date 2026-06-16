@@ -33,13 +33,20 @@ const (
 
 	// Per-device + per-IP rate limits, looser than the regular decoy
 	// endpoint because a 21-card sitting is the intended use. 30/hour
-	// gives the user comfortable room to finish a deck in one go; the
-	// per-IP ceiling tolerates shared NAT.
+	// per device gives the user comfortable room to finish a deck in
+	// one go.
+	//
+	// Per-IP is temporarily elevated to 300/hour for the r/SampleSize
+	// CTA window. The concern is carrier-grade NAT (mobile carriers,
+	// dorm networks) where many distinct users share one IP; the
+	// non-campaign default (100/hour) was tuned for steady-state
+	// traffic. Revert to 100 after the campaign tail-off — see the
+	// commit that introduced the bump.
 	prelaunchSubmitDeviceCapacity = 30
 	prelaunchSubmitDeviceRefill   = 30.0 // per hour
 
-	prelaunchSubmitIPCapacity = 100
-	prelaunchSubmitIPRefill   = 100.0 // per hour
+	prelaunchSubmitIPCapacity = 300
+	prelaunchSubmitIPRefill   = 300.0 // per hour
 )
 
 // prelaunchCard is one entry rendered server-side into the deck grid.
