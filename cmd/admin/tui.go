@@ -302,8 +302,16 @@ type subsLoadedMsg struct {
 }
 
 type decisionDoneMsg struct {
-	decision string // "approved" | "rejected"
-	err      error
+	decision    string // "approved" | "rejected"
+	promptID    uuid.UUID
+	prelaunchID uuid.UUID
+	// decoyID is the new decoy_submissions.id minted by ApprovePrelaunch;
+	// only set on the approve path. The handler uses this to stamp
+	// m.subs[i].IngestedDecoy with the *real* id so a subsequent "Make
+	// puzzle" can pass it through ComposeRoundAnswersExplicit (which
+	// validates against decoy_submissions.id, not pre_launch.id).
+	decoyID uuid.UUID
+	err     error
 }
 
 func loadPromptsCmd(ctx context.Context, d *db.DB) tea.Cmd {
@@ -374,17 +382,28 @@ type puzzleDetail struct {
 	catchTotal  *int
 }
 
-func approveCmd(ctx context.Context, d *db.DB, prelaunchID, reviewerID uuid.UUID, note string) tea.Cmd {
+func approveCmd(ctx context.Context, d *db.DB, promptID, prelaunchID, reviewerID uuid.UUID, note string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := d.ApprovePrelaunch(ctx, prelaunchID, reviewerID, note)
-		return decisionDoneMsg{decision: "approved", err: err}
+		decoyID, err := d.ApprovePrelaunch(ctx, prelaunchID, reviewerID, note)
+		return decisionDoneMsg{
+			decision:    "approved",
+			promptID:    promptID,
+			prelaunchID: prelaunchID,
+			decoyID:     decoyID,
+			err:         err,
+		}
 	}
 }
 
-func rejectCmd(ctx context.Context, d *db.DB, prelaunchID, reviewerID uuid.UUID, note string) tea.Cmd {
+func rejectCmd(ctx context.Context, d *db.DB, promptID, prelaunchID, reviewerID uuid.UUID, note string) tea.Cmd {
 	return func() tea.Msg {
 		err := d.RejectPrelaunch(ctx, prelaunchID, reviewerID, note)
-		return decisionDoneMsg{decision: "rejected", err: err}
+		return decisionDoneMsg{
+			decision:    "rejected",
+			promptID:    promptID,
+			prelaunchID: prelaunchID,
+			err:         err,
+		}
 	}
 }
 
@@ -463,13 +482,19 @@ func loadPuzzleDetailCmd(ctx context.Context, d *db.DB, p db.DailyPuzzle) tea.Cm
 // --- build-flow messages + commands -----------------------------------------
 
 type botGeneratedMsg struct {
-	bot *generatedBot
-	err error
+	// promptID is the prompt this generation was kicked off for. The
+	// handler ignores results whose promptID doesn't match
+	// m.currentPromptID — guards against the user navigating to a
+	// different prompt while the LLM call was in flight.
+	promptID uuid.UUID
+	bot      *generatedBot
+	err      error
 }
 
 type botAcceptedMsg struct {
-	botID uuid.UUID
-	err   error
+	promptID uuid.UUID
+	botID    uuid.UUID
+	err      error
 }
 
 type assembledMsg struct {
@@ -484,19 +509,22 @@ type assembledMsg struct {
 // caller (so it's stable across regenerate cycles if the reviewer wants
 // to re-run the same voice) and the resolved archetype id flows through
 // so the accept path doesn't re-query.
-func generateBotCmd(ctx context.Context, client *llm.Client, req llm.BotLineRequest, archetypeID uuid.UUID, archetypeSlug string) tea.Cmd {
+func generateBotCmd(ctx context.Context, client *llm.Client, req llm.BotLineRequest, promptID, archetypeID uuid.UUID, archetypeSlug string) tea.Cmd {
 	return func() tea.Msg {
 		res, err := client.GenerateBotLine(ctx, req)
 		if err != nil {
-			return botGeneratedMsg{err: err}
+			return botGeneratedMsg{promptID: promptID, err: err}
 		}
-		return botGeneratedMsg{bot: &generatedBot{
-			text:          res.Text,
-			archetypeID:   archetypeID,
-			archetypeSlug: archetypeSlug,
-			archetypeName: req.ArchetypeName,
-			llmModel:      res.Model,
-		}}
+		return botGeneratedMsg{
+			promptID: promptID,
+			bot: &generatedBot{
+				text:          res.Text,
+				archetypeID:   archetypeID,
+				archetypeSlug: archetypeSlug,
+				archetypeName: req.ArchetypeName,
+				llmModel:      res.Model,
+			},
+		}
 	}
 }
 
@@ -506,7 +534,7 @@ func generateBotCmd(ctx context.Context, client *llm.Client, req llm.BotLineRequ
 func acceptBotCmd(ctx context.Context, d *db.DB, promptID, archetypeID uuid.UUID, text, llmModel string) tea.Cmd {
 	return func() tea.Msg {
 		id, err := d.InsertApprovedBotLine(ctx, promptID, archetypeID, text, llmModel)
-		return botAcceptedMsg{botID: id, err: err}
+		return botAcceptedMsg{promptID: promptID, botID: id, err: err}
 	}
 }
 
@@ -681,6 +709,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case botGeneratedMsg:
+		// Stale-generation guard: ignore results for prompts the
+		// reviewer has navigated away from. Without this, a slow LLM
+		// call kicked off on prompt A could pop up on prompt B and
+		// the reviewer could accept a bot whose text was generated
+		// for the wrong prompt.
+		if msg.promptID != m.currentPromptID {
+			return m, nil
+		}
 		m.generating = false
 		if msg.err != nil {
 			m.flash = styleReject.Render("llm: " + msg.err.Error())
@@ -694,6 +730,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case botAcceptedMsg:
+		// Same stale-result guard as botGeneratedMsg. The DB write
+		// is committed regardless; we just don't apply the in-memory
+		// state to a different prompt's screen.
+		if msg.promptID != m.currentPromptID {
+			return m, nil
+		}
 		if msg.err != nil {
 			m.flash = styleReject.Render("accept bot: " + msg.err.Error())
 			m.flashAt = time.Now()
@@ -755,6 +797,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case decisionDoneMsg:
+		// Stale-result guard: if the user navigated to a different prompt
+		// while this decision was in flight, drop the result silently.
+		// The DB write is already committed; only the in-memory mutation
+		// is suppressed. The new prompt's list was loaded fresh from the
+		// DB, so it already reflects the correct state.
+		if msg.promptID != m.currentPromptID {
+			return m, nil
+		}
 		if msg.err != nil {
 			if errors.Is(msg.err, db.ErrPrelaunchAlreadyDecided) {
 				m.flash = "already decided — skipping"
@@ -764,23 +814,30 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 		} else {
+			// Find the row by prelaunchID rather than indexing by
+			// m.subIndex — the cursor may have moved since the
+			// async approve was kicked off.
+			rowIdx := -1
+			for i, s := range m.subs {
+				if s.ID == msg.prelaunchID {
+					rowIdx = i
+					break
+				}
+			}
 			switch msg.decision {
 			case "approved":
 				m.approved++
 				m.flash = styleApprove.Render("approved")
-				// Mutate in-place so the badge updates without a refetch.
-				// IngestedDecoy was set server-side; we just need a non-nil
-				// value to flip the "[PENDING] → [APPROVED]" badge.
-				if m.subIndex < len(m.subs) {
-					placeholder := m.subs[m.subIndex].ID
-					m.subs[m.subIndex].IngestedDecoy = &placeholder
+				if rowIdx >= 0 {
+					id := msg.decoyID
+					m.subs[rowIdx].IngestedDecoy = &id
 				}
 			case "rejected":
 				m.rejected++
 				m.flash = styleReject.Render("rejected")
-				if m.subIndex < len(m.subs) {
+				if rowIdx >= 0 {
 					now := time.Now()
-					m.subs[m.subIndex].RejectedAt = &now
+					m.subs[rowIdx].RejectedAt = &now
 				}
 			}
 			m.flashAt = time.Now()
@@ -1037,9 +1094,9 @@ func (m tuiModel) handleKeyReview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.String() {
 		case "a":
-			return m, approveCmd(m.ctx, m.db, cur.ID, m.reviewerID, note)
+			return m, approveCmd(m.ctx, m.db, cur.PromptID, cur.ID, m.reviewerID, note)
 		case "r":
-			return m, rejectCmd(m.ctx, m.db, cur.ID, m.reviewerID, note)
+			return m, rejectCmd(m.ctx, m.db, cur.PromptID, cur.ID, m.reviewerID, note)
 		}
 	case "n":
 		if decided {
@@ -1096,7 +1153,7 @@ func (m tuiModel) handleKeyReview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			ArchetypeDifficulty: a.Difficulty,
 			HumanLines:          approvedHumanTextsForPrompt(m.subs),
 		}
-		return m, generateBotCmd(m.ctx, m.llmClient, req, archID, a.Slug)
+		return m, generateBotCmd(m.ctx, m.llmClient, req, cur.PromptID, archID, a.Slug)
 
 	case "y":
 		if m.botPending == nil {
