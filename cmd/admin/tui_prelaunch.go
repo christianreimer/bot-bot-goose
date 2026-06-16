@@ -5,14 +5,16 @@
 //   1. PROMPT LIST — every prompt with its pending/ingested/rejected counts
 //      and current approved-decoy pool size. Sorted by PENDING desc so the
 //      reviewer always opens the prompt that needs the most attention.
+//      Locked prompts (already in a built puzzle) are excluded.
 //
-//   2. REVIEW — one submission at a time, full text on screen. Keys:
-//        a   approve
-//        t   approve marked as trap
-//        r   reject
-//        s   skip (don't decide; move on)
-//        n   edit note (attaches to the next decision only)
-//        u   undo skip / jump back one submission
+//   2. REVIEW — the full list of submissions for one prompt, with per-row
+//      decisions. Cursor moves with ↑↓; a/t/r decide the cursored row and
+//      auto-advance to the next pending. Already-decided rows are read-only
+//      this iteration (reversal is a separate change).
+//        a   approve cursored row
+//        t   approve cursored row as trap
+//        r   reject cursored row
+//        n   open note input (attaches to the next decision)
 //        esc back to prompt list
 //        q   quit
 //
@@ -168,7 +170,6 @@ type tuiModel struct {
 	// session stats
 	approved int
 	rejected int
-	skipped  int
 
 	// transient bottom line
 	flash   string
@@ -368,20 +369,26 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "approved":
 				m.approved++
 				m.flash = styleApprove.Render("approved")
+				// Mutate in-place so the badge updates without a refetch.
+				// IngestedDecoy was set server-side; we just need a non-nil
+				// value to flip the "[PENDING] → [APPROVED]" badge.
+				if m.subIndex < len(m.subs) {
+					placeholder := m.subs[m.subIndex].ID
+					m.subs[m.subIndex].IngestedDecoy = &placeholder
+				}
 			case "rejected":
 				m.rejected++
 				m.flash = styleReject.Render("rejected")
+				if m.subIndex < len(m.subs) {
+					now := time.Now()
+					m.subs[m.subIndex].RejectedAt = &now
+				}
 			}
 			m.flashAt = time.Now()
 		}
-		// Clear the note (one-shot per decision) and advance.
+		// Clear the note (one-shot per decision) and step to next pending.
 		m.note.SetValue("")
-		m.subIndex++
-		if m.subIndex >= len(m.subs) {
-			// Exhausted this prompt — go back to overview, refresh.
-			m.screen = screenPrompts
-			return m, loadPromptsCmd(m.ctx, m.db)
-		}
+		m.advanceCursorToNextPending()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -560,20 +567,35 @@ func (m tuiModel) visiblePrompts() []db.PrelaunchPromptRollup {
 }
 
 func (m tuiModel) handleKeyReview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.subIndex >= len(m.subs) {
+	if len(m.subs) == 0 {
 		return m, nil
+	}
+	if m.subIndex >= len(m.subs) {
+		m.subIndex = len(m.subs) - 1
 	}
 	cur := m.subs[m.subIndex]
 	note := m.note.Value()
 	decided := cur.IngestedDecoy != nil || cur.RejectedAt != nil
 
 	switch msg.String() {
+	case "down", "j":
+		if m.subIndex < len(m.subs)-1 {
+			m.subIndex++
+		}
+		return m, nil
+	case "up", "k":
+		if m.subIndex > 0 {
+			m.subIndex--
+		}
+		return m, nil
+	case "g", "home":
+		m.subIndex = 0
+		return m, nil
+	case "G", "end":
+		m.subIndex = len(m.subs) - 1
+		return m, nil
 	case "a", "t", "r":
 		if decided {
-			// Read-only: this row is already in moderation_reviews; the
-			// DB layer would refuse with ErrPrelaunchAlreadyDecided
-			// anyway. Surface that intent up here so the operator sees
-			// it immediately, no DB round-trip.
 			m.flash = styleMuted.Render("already decided — read-only")
 			m.flashAt = time.Now()
 			return m, nil
@@ -586,21 +608,6 @@ func (m tuiModel) handleKeyReview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "r":
 			return m, rejectCmd(m.ctx, m.db, cur.ID, m.reviewerID, note)
 		}
-	case "s":
-		m.skipped++
-		m.flash = styleSkip.Render("skipped")
-		m.flashAt = time.Now()
-		m.subIndex++
-		if m.subIndex >= len(m.subs) {
-			m.screen = screenPrompts
-			return m, loadPromptsCmd(m.ctx, m.db)
-		}
-		return m, nil
-	case "u":
-		if m.subIndex > 0 {
-			m.subIndex--
-		}
-		return m, nil
 	case "n":
 		if decided {
 			m.flash = styleMuted.Render("can't attach a note to a decided row")
@@ -612,6 +619,23 @@ func (m tuiModel) handleKeyReview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, textinput.Blink
 	}
 	return m, nil
+}
+
+// advanceCursorToNextPending moves m.subIndex to the next PENDING row at or
+// after the current cursor (skipping anything already decided). If nothing
+// pending remains below, falls back to the next decided row so the reviewer
+// can still page forward visually. If the list is exhausted, leaves the
+// cursor at the last index.
+func (m *tuiModel) advanceCursorToNextPending() {
+	for i := m.subIndex + 1; i < len(m.subs); i++ {
+		if m.subs[i].IngestedDecoy == nil && m.subs[i].RejectedAt == nil {
+			m.subIndex = i
+			return
+		}
+	}
+	if m.subIndex < len(m.subs)-1 {
+		m.subIndex++
+	}
 }
 
 // --- view -------------------------------------------------------------------
@@ -640,10 +664,9 @@ func (m tuiModel) View() string {
 
 func (m tuiModel) header() string {
 	left := styleBrand.Render("🪿  bot bot goose") + styleMuted.Render(" · prelaunch review")
-	right := fmt.Sprintf("%s %d  %s %d  %s %d",
+	right := fmt.Sprintf("%s %d  %s %d",
 		styleApprove.Render("approved"), m.approved,
 		styleReject.Render("rejected"), m.rejected,
-		styleSkip.Render("skipped"), m.skipped,
 	)
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 2 {
@@ -788,15 +811,17 @@ func decorate(label string, col sortColumn, m tuiModel) string {
 }
 
 func (m tuiModel) viewReview() string {
+	if len(m.subs) == 0 {
+		return styleMuted.Render("no submissions for this prompt")
+	}
 	if m.subIndex >= len(m.subs) {
-		return styleMuted.Render("no more submissions for this prompt")
+		m.subIndex = len(m.subs) - 1
 	}
 	cur := m.subs[m.subIndex]
 
-	// Count how many of each status are in this prompt's queue so the
-	// header reflects "pending 3 of 5 submissions · 1 approved, 1 rejected"
-	// — clearer than just "submission 3 of 5" when several have already
-	// been decided.
+	// Per-prompt rollup of statuses for the header. "3 needed" reflects
+	// the puzzle-build target — every round wants exactly 3 humans. Anything
+	// beyond is overshoot the reviewer can ignore (or keep for the pool).
 	var pending, approved, rejected int
 	for _, s := range m.subs {
 		switch {
@@ -808,23 +833,44 @@ func (m tuiModel) viewReview() string {
 			pending++
 		}
 	}
-	progress := fmt.Sprintf("submission %d of %d  ·  %d pending  %d approved  %d rejected",
-		m.subIndex+1, len(m.subs), pending, approved, rejected)
-
-	// Status badge on the current row.
-	var badge string
-	switch {
-	case cur.IngestedDecoy != nil:
-		badge = styleApprove.Render("[APPROVED]")
-	case cur.RejectedAt != nil:
-		badge = styleReject.Render("[REJECTED]")
-	default:
-		badge = styleMuted.Render("[PENDING]")
-	}
+	progress := fmt.Sprintf("%s approved of 3 needed  ·  %d pending  ·  %d rejected",
+		approvedCounter(approved), pending, rejected)
 
 	prompt := styleKick.Render("PROMPT") + "\n" +
 		stylePrompt.Render(cur.PromptText)
 
+	// List: one row per submission. Each row carries its status badge so
+	// the reviewer can scan the whole queue at a glance instead of paging
+	// through one at a time.
+	const badgeWidth = 11 // "[APPROVED] " widest visible badge
+	rowTextWidth := m.width - badgeWidth - 4
+	if rowTextWidth < 20 {
+		rowTextWidth = 20
+	}
+	var listLines []string
+	for i, s := range m.subs {
+		var badge string
+		switch {
+		case s.IngestedDecoy != nil:
+			badge = styleApprove.Render("[APPROVED]")
+		case s.RejectedAt != nil:
+			badge = styleReject.Render("[REJECTED]")
+		default:
+			badge = styleKick.Render("[PENDING] ")
+		}
+		text := truncateW(singleLine(s.Text), rowTextWidth)
+		prefix := "  "
+		if i == m.subIndex {
+			prefix = styleKick.Render("› ")
+		}
+		row := prefix + badge + "  " + text
+		if i == m.subIndex {
+			row = styleSelected.Render(row)
+		}
+		listLines = append(listLines, row)
+	}
+
+	// Focused detail box — full text + metadata for the cursor row.
 	subBox := styleSub.Width(maxInt(m.width-2, 40)).Render(cur.Text)
 
 	meta := []string{}
@@ -851,16 +897,34 @@ func (m tuiModel) viewReview() string {
 		}
 	}
 
-	return strings.Join([]string{
+	parts := []string{
 		styleMuted.Render(progress),
 		"",
 		prompt,
-		styleKick.Render("SUBMISSION") + "  " + badge,
-		subBox,
-		metaLine,
-		"",
-		noteLine,
-	}, "\n")
+		styleKick.Render("SUBMISSIONS"),
+	}
+	parts = append(parts, listLines...)
+	parts = append(parts, "", subBox, metaLine, "", noteLine)
+	return strings.Join(parts, "\n")
+}
+
+// approvedCounter renders the approved count with reed (green) once the
+// puzzle-build target of 3 is hit, muted before that. Visual cue that the
+// human-line slot is ready to use in a "Make puzzle" step.
+func approvedCounter(n int) string {
+	if n >= 3 {
+		return styleApprove.Render(fmt.Sprintf("%d", n))
+	}
+	return fmt.Sprintf("%d", n)
+}
+
+// singleLine collapses internal newlines to spaces so multi-line submissions
+// render predictably in the one-line-per-row list. The focus detail box
+// below the list still wraps to show the full text.
+func singleLine(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	return s
 }
 
 func (m tuiModel) footer() string {
@@ -874,18 +938,18 @@ func (m tuiModel) footer() string {
 		case m.noteOpen:
 			keys = "type note · enter confirm · esc cancel"
 		case m.subIndex < len(m.subs) && (m.subs[m.subIndex].IngestedDecoy != nil || m.subs[m.subIndex].RejectedAt != nil):
-			// Already-decided row: action keys are dimmed because the
-			// DB layer would refuse them anyway. Operator can still
-			// page through with s/u and back out with esc.
-			keys = styleMuted.Render("a/t/r disabled — already decided") + "  " +
-				styleSkip.Render("s next") + "  " +
-				"u prev  esc back  q quit"
+			// Cursor row is already decided: a/t/r are no-ops because
+			// reversal is not yet supported. Navigation keys still work
+			// so the reviewer can move to a pending row.
+			keys = "↑↓ nav  " +
+				styleMuted.Render("a/t/r disabled (already decided)") + "  " +
+				"esc back  q quit"
 		default:
-			keys = styleApprove.Render("a approve") + "  " +
+			keys = "↑↓ nav  " +
+				styleApprove.Render("a approve") + "  " +
 				styleApprove.Render("t approve+trap") + "  " +
 				styleReject.Render("r reject") + "  " +
-				styleSkip.Render("s skip") + "  " +
-				"n note  u undo  esc back  q quit"
+				"n note  esc back  q quit"
 		}
 	}
 	flash := ""
