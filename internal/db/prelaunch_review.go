@@ -134,10 +134,18 @@ type PrelaunchPromptRollup struct {
 
 // PrelaunchPromptCounts returns per-prompt rollups for all non-retired prompts.
 // Caller orders/filters in the UI layer.
+//
+// LEFT JOIN gotcha: a prompt with zero submissions still produces one
+// joined row (everything on the right side is NULL). A naive FILTER like
+// `pls.ingested_decoy_id IS NULL AND pls.rejected_at IS NULL` is TRUE for
+// that all-NULL row, so every prompt would show `pending=1` whether or
+// not anyone actually submitted to it. The `pls.id IS NOT NULL` guard
+// excludes the no-match row from every count.
 func (d *DB) PrelaunchPromptCounts(ctx context.Context) ([]PrelaunchPromptRollup, error) {
 	const q = `
 		SELECT p.id, p.text,
-		       COUNT(*) FILTER (WHERE pls.ingested_decoy_id IS NULL
+		       COUNT(*) FILTER (WHERE pls.id IS NOT NULL
+		                          AND pls.ingested_decoy_id IS NULL
 		                          AND pls.rejected_at IS NULL)             AS pending,
 		       COUNT(*) FILTER (WHERE pls.ingested_decoy_id IS NOT NULL)    AS ingested,
 		       COUNT(*) FILTER (WHERE pls.rejected_at IS NOT NULL)          AS rejected,
