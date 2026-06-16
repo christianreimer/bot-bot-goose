@@ -15,9 +15,14 @@ type PrelaunchPrompt struct {
 	Text string
 }
 
-// PrelaunchEligiblePool returns every prompt that's not retired AND has fewer
-// than 5 live (non-rejected) rows in pre_launch_submissions. Unfiltered by
-// user — that filter happens in Go after a cache lookup, see plan §2.7.
+// PrelaunchEligiblePool returns every prompt that's not retired, not locked
+// in a built puzzle, AND has fewer than 5 live (non-rejected) rows in
+// pre_launch_submissions. Unfiltered by user — that filter happens in Go
+// after a cache lookup, see plan §2.7.
+//
+// "Locked" = the prompt is already referenced by a puzzle_rounds row, i.e.
+// the puzzle builder picked 3 of its approved lines and froze them in. More
+// submissions for that prompt would be moot.
 //
 // The list is small enough (~hundreds at v1) that returning it whole and
 // sampling client-side beats running the random+limit in SQL on every
@@ -35,6 +40,9 @@ func (d *DB) PrelaunchEligiblePool(ctx context.Context) ([]PrelaunchPrompt, erro
 		  LEFT JOIN counts c ON c.prompt_id = p.id
 		 WHERE p.retired_at IS NULL
 		   AND COALESCE(c.n, 0) < 5
+		   AND NOT EXISTS (
+		     SELECT 1 FROM puzzle_rounds pr WHERE pr.prompt_id = p.id
+		   )
 	`
 	rows, err := d.Query(ctx, q)
 	if err != nil {

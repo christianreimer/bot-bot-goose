@@ -174,37 +174,28 @@ func (d *DB) DecoyForUserAndPrompt(ctx context.Context, userID, promptID uuid.UU
 	return out, nil
 }
 
-// NextSolicitPrompt picks the prompt to ask a player to write a decoy for,
-// given they just finished puzzle `currentNumber`. Preference order:
+// NextSolicitPrompt picks the prompt to ask a player to write a line for,
+// given they just finished puzzle `currentNumber`. Returns any non-retired,
+// non-locked prompt at random.
 //
-//  1. The first prompt of puzzle (currentNumber + 1), if it exists — keeps the
-//     "your words could be in tomorrow's puzzle" narrative concrete.
-//  2. Otherwise, any non-retired prompt picked at random.
+// "Locked" = the prompt is already in a built puzzle (puzzle_rounds row
+// exists). The reviewer's "Make puzzle" action bakes 3 lines per prompt into
+// the puzzle at build time; soliciting more lines for a locked prompt would
+// never reach a puzzle, so we don't surface it on the result-page CTA.
 //
-// In v1 this is the prompt shown on the result-page decoy form. A submitted
-// decoy goes to moderation regardless; the "for tomorrow's puzzle" framing is
-// motivational copy, not a hard scheduling guarantee.
+// The currentNumber parameter is kept for ABI compatibility but no longer
+// used: under the build flow, "the prompt that tomorrow's puzzle uses" is
+// already locked.
 func (d *DB) NextSolicitPrompt(ctx context.Context, currentNumber int32) (uuid.UUID, string, error) {
-	const next = `
-		SELECT p.id, p.text
-		  FROM daily_puzzles dp
-		  JOIN puzzle_rounds pr ON pr.daily_puzzle_id = dp.id AND pr.round_index = 0
-		  JOIN prompts p ON p.id = pr.prompt_id
-		 WHERE dp.puzzle_number = $1
-	`
+	_ = currentNumber
 	var id uuid.UUID
 	var text string
-	err := d.QueryRow(ctx, next, currentNumber+1).Scan(&id, &text)
-	if err == nil {
-		return id, text, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, "", err
-	}
-	// Fallback: any non-retired prompt.
-	err = d.QueryRow(ctx, `
-		SELECT id, text FROM prompts
-		 WHERE retired_at IS NULL
+	err := d.QueryRow(ctx, `
+		SELECT p.id, p.text FROM prompts p
+		 WHERE p.retired_at IS NULL
+		   AND NOT EXISTS (
+		     SELECT 1 FROM puzzle_rounds pr WHERE pr.prompt_id = p.id
+		   )
 		 ORDER BY random()
 		 LIMIT 1
 	`).Scan(&id, &text)

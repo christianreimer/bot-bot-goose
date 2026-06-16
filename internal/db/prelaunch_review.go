@@ -132,8 +132,14 @@ type PrelaunchPromptRollup struct {
 	ApprovedDec int // count of approved live decoys for this prompt (the live pool)
 }
 
-// PrelaunchPromptCounts returns per-prompt rollups for all non-retired prompts.
-// Caller orders/filters in the UI layer.
+// PrelaunchPromptCounts returns per-prompt rollups for all non-retired,
+// non-locked prompts. Caller orders/filters in the UI layer.
+//
+// "Locked" = already referenced by a puzzle_rounds row, i.e. the puzzle
+// builder has baked its 3 lines in. Locked prompts are excluded entirely
+// from this listing — they surface in the upcoming / history TUI views
+// instead. Once a prompt is in a puzzle, no further review decisions on
+// its pool can change what the puzzle serves.
 //
 // LEFT JOIN gotcha: a prompt with zero submissions still produces one
 // joined row (everything on the right side is NULL). A naive FILTER like
@@ -156,6 +162,9 @@ func (d *DB) PrelaunchPromptCounts(ctx context.Context) ([]PrelaunchPromptRollup
 		  FROM prompts p
 		  LEFT JOIN pre_launch_submissions pls ON pls.prompt_id = p.id
 		 WHERE p.retired_at IS NULL
+		   AND NOT EXISTS (
+		     SELECT 1 FROM puzzle_rounds pr WHERE pr.prompt_id = p.id
+		   )
 		 GROUP BY p.id, p.text
 		 ORDER BY pending DESC, p.text`
 	rows, err := d.Query(ctx, q)
