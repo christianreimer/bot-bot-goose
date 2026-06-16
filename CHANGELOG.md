@@ -6,6 +6,13 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 Tracked in [BACKLOG.md](BACKLOG.md). Most prominent: moderation queue UI, magic-link auth, AI-detection on submissions, slot E/P/B bandit in the composer.
 
+### Removed — `is_trap` boolean (migration 0002_drop_is_trap)
+
+- Dropped `decoy_submissions.is_trap` and `puzzle_round_answers.is_trap`. The flag was plumbed through schema, admin CLI (`--is-trap` on prelaunch review + bulk-review), and the review TUI's `t` (approve+trap) key, but no game logic ever consumed it.
+- Reviewer UX is now `a` (approve) and `r` (reject); the `t` key is gone. CLI `--is-trap` flag removed; existing scripts will error on it (no silent ignore).
+- `Decoy.IsTrap`, `Answer.IsTrap`, and `RoundAnswerStat.IsTrap` removed from `internal/db`. `ApprovePrelaunch` signature drops the `isTrap bool` parameter.
+- The backlog entry "Variable target count + traps" is now "Variable target count" — traps remain a future idea but should ride on a derived signal (e.g. `ai_detector_score`), not a hand-tagged boolean (see BACKLOG.md).
+
 ### Changed — Default handle `AnonymousGoose<n>` → `Human<n>` (migration 0012)
 
 - `CreateAnonymousUser` now mints handles of the form `Human<n>`. Sequence renamed `anonymous_goose_seq` → `human_seq`; existing `AnonymousGoose<n>` rows backfilled to `Human<n>` with the same number.

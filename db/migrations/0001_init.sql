@@ -123,7 +123,6 @@ CREATE TABLE decoy_submissions (
     user_id             UUID REFERENCES users(id),
     text                TEXT NOT NULL,
     status              moderation_status NOT NULL DEFAULT 'pending',
-    is_trap             BOOLEAN NOT NULL DEFAULT false,
     ai_detector_score   NUMERIC,
     submitted_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at          TIMESTAMPTZ
@@ -215,7 +214,6 @@ CREATE TABLE puzzle_round_answers (
     content_kind        TEXT NOT NULL CHECK (content_kind IN ('bot','decoy')),
     bot_candidate_id    UUID REFERENCES bot_candidates(id),
     decoy_id            UUID REFERENCES decoy_submissions(id),
-    is_trap             BOOLEAN NOT NULL DEFAULT false,
     author_user_id      UUID REFERENCES users(id),
     -- denormalized text snapshot — historical puzzles must remain stable
     -- even if a candidate is retired or a user deletes their decoy.

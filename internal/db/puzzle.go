@@ -98,7 +98,7 @@ func (d *DB) Rounds(ctx context.Context, puzzleID uuid.UUID) ([]PuzzleRound, err
 func (d *DB) AnswersForRound(ctx context.Context, roundID uuid.UUID) ([]Answer, error) {
 	const q = `
 		SELECT id, round_id, content_kind, bot_candidate_id, decoy_id,
-		       is_trap, author_user_id, answer_text
+		       author_user_id, answer_text
 		  FROM puzzle_round_answers
 		 WHERE round_id = $1
 		 ORDER BY id
@@ -111,7 +111,7 @@ func (d *DB) AnswersForRound(ctx context.Context, roundID uuid.UUID) ([]Answer, 
 	var out []Answer
 	for rows.Next() {
 		var a Answer
-		if err := rows.Scan(&a.ID, &a.RoundID, &a.ContentKind, &a.BotCandidateID, &a.DecoyID, &a.IsTrap, &a.AuthorUserID, &a.AnswerText); err != nil {
+		if err := rows.Scan(&a.ID, &a.RoundID, &a.ContentKind, &a.BotCandidateID, &a.DecoyID, &a.AuthorUserID, &a.AnswerText); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
@@ -256,9 +256,9 @@ func (d *DB) ReplaceRoundAnswers(ctx context.Context, roundID uuid.UUID, answers
 	for _, a := range answers {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO puzzle_round_answers
-			    (round_id, content_kind, bot_candidate_id, decoy_id, is_trap, author_user_id, answer_text)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
-		`, roundID, string(a.ContentKind), a.BotCandidateID, a.DecoyID, a.IsTrap, a.AuthorUserID, a.AnswerText)
+			    (round_id, content_kind, bot_candidate_id, decoy_id, author_user_id, answer_text)
+			VALUES ($1, $2, $3, $4, $5, $6)
+		`, roundID, string(a.ContentKind), a.BotCandidateID, a.DecoyID, a.AuthorUserID, a.AnswerText)
 		if err != nil {
 			return err
 		}
@@ -850,7 +850,6 @@ func (d *DB) PuzzlePlayCount(ctx context.Context, puzzleID uuid.UUID) (int, erro
 type RoundAnswerStat struct {
 	AnswerID uuid.UUID
 	IsBot    bool
-	IsTrap   bool
 	Text     string
 	Picks    int
 }
@@ -868,7 +867,7 @@ type RoundAnswerStat struct {
 func (d *DB) RoundAnswerStats(ctx context.Context, roundID, puzzleID uuid.UUID, roundIndex int16) ([]RoundAnswerStat, int, error) {
 	rows, err := d.Query(ctx, `
 		WITH answers AS (
-		    SELECT id, content_kind, is_trap, answer_text,
+		    SELECT id, content_kind, answer_text,
 		           (ROW_NUMBER() OVER (ORDER BY id) - 1)::int AS canonical_ord
 		      FROM puzzle_round_answers
 		     WHERE round_id = $1
@@ -886,13 +885,12 @@ func (d *DB) RoundAnswerStats(ctx context.Context, roundID, puzzleID uuid.UUID, 
 		)
 		SELECT a.id,
 		       a.content_kind = 'bot',
-		       a.is_trap,
 		       a.answer_text,
 		       COALESCE(COUNT(g.canonical_pick), 0)::int AS picks,
 		       (SELECT COUNT(*) FROM plays_for_round)::int AS total_plays
 		  FROM answers a
 		  LEFT JOIN guesses g ON g.canonical_pick = a.canonical_ord
-		 GROUP BY a.id, a.content_kind, a.is_trap, a.answer_text, a.canonical_ord
+		 GROUP BY a.id, a.content_kind, a.answer_text, a.canonical_ord
 		 ORDER BY a.canonical_ord
 	`, roundID, puzzleID, roundIndex)
 	if err != nil {
@@ -903,7 +901,7 @@ func (d *DB) RoundAnswerStats(ctx context.Context, roundID, puzzleID uuid.UUID, 
 	var totalPlays int
 	for rows.Next() {
 		var r RoundAnswerStat
-		if err := rows.Scan(&r.AnswerID, &r.IsBot, &r.IsTrap, &r.Text, &r.Picks, &totalPlays); err != nil {
+		if err := rows.Scan(&r.AnswerID, &r.IsBot, &r.Text, &r.Picks, &totalPlays); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, r)

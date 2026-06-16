@@ -18,7 +18,6 @@ type Decoy struct {
 	UserID          *uuid.UUID
 	Text            string
 	Status          string
-	IsTrap          bool
 	AIDetectorScore *float64
 	SubmittedAt     time.Time
 	DeletedAt       *time.Time
@@ -40,7 +39,7 @@ type DecoyListOpts struct {
 func (d *DB) ListDecoys(ctx context.Context, opts DecoyListOpts) ([]Decoy, error) {
 	q := `
 		SELECT ds.id, ds.prompt_id, p.text, ds.user_id, ds.text, ds.status,
-		       ds.is_trap, ds.ai_detector_score, ds.submitted_at, ds.deleted_at
+		       ds.ai_detector_score, ds.submitted_at, ds.deleted_at
 		  FROM decoy_submissions ds
 		  JOIN prompts p ON p.id = ds.prompt_id
 		 WHERE 1=1`
@@ -87,7 +86,7 @@ func (d *DB) ListDecoys(ctx context.Context, opts DecoyListOpts) ([]Decoy, error
 		var dc Decoy
 		if err := rows.Scan(
 			&dc.ID, &dc.PromptID, &dc.PromptText, &dc.UserID, &dc.Text, &dc.Status,
-			&dc.IsTrap, &dc.AIDetectorScore, &dc.SubmittedAt, &dc.DeletedAt,
+			&dc.AIDetectorScore, &dc.SubmittedAt, &dc.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -100,7 +99,7 @@ func (d *DB) ListDecoys(ctx context.Context, opts DecoyListOpts) ([]Decoy, error
 func (d *DB) DecoyByID(ctx context.Context, id uuid.UUID) (*Decoy, error) {
 	const q = `
 		SELECT ds.id, ds.prompt_id, p.text, ds.user_id, ds.text, ds.status,
-		       ds.is_trap, ds.ai_detector_score, ds.submitted_at, ds.deleted_at
+		       ds.ai_detector_score, ds.submitted_at, ds.deleted_at
 		  FROM decoy_submissions ds
 		  JOIN prompts p ON p.id = ds.prompt_id
 		 WHERE ds.id = $1`
@@ -108,7 +107,7 @@ func (d *DB) DecoyByID(ctx context.Context, id uuid.UUID) (*Decoy, error) {
 	dc := &Decoy{}
 	err := row.Scan(
 		&dc.ID, &dc.PromptID, &dc.PromptText, &dc.UserID, &dc.Text, &dc.Status,
-		&dc.IsTrap, &dc.AIDetectorScore, &dc.SubmittedAt, &dc.DeletedAt,
+		&dc.AIDetectorScore, &dc.SubmittedAt, &dc.DeletedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

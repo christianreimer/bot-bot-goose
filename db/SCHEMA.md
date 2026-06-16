@@ -191,7 +191,6 @@ User-submitted human answers (the contribution loop).
 | `user_id`            | UUID                                    | FK `→ users.id`; nullable for seed/system rows   |
 | `text`               | TEXT NOT NULL                           |                                                  |
 | `status`             | `moderation_status`, default `pending`  |                                                  |
-| `is_trap`            | BOOL, default false                     | bait set to catch bandit drift                   |
 | `ai_detector_score`  | NUMERIC                                 | nullable; heuristic 0..1                         |
 | `submitted_at`       | TIMESTAMPTZ                             |                                                  |
 | `deleted_at`         | TIMESTAMPTZ                             | soft delete                                      |
@@ -344,7 +343,6 @@ The 4 answer choices per round — the canonical pool the play-time `slot_permut
 | `content_kind`      | TEXT CHECK ∈ ('bot','decoy')  |                                                                       |
 | `bot_candidate_id`  | UUID                          | FK `→ bot_candidates.id`; **exactly one** of (bot_candidate_id, decoy_id) is set, matching `content_kind` |
 | `decoy_id`          | UUID                          | FK `→ decoy_submissions.id`                                           |
-| `is_trap`           | BOOL, default false           |                                                                       |
 | `author_user_id`    | UUID                          | FK `→ users.id`; nullable                                             |
 | `answer_text`       | TEXT NOT NULL                 | **denormalized snapshot** — historical puzzles read this directly     |
 
@@ -353,12 +351,12 @@ The 4 answer choices per round — the canonical pool the play-time `slot_permut
 
 **Example rows** (canonical order = by id; `slot_permutation` reorders per play):
 
-| id    | round_id | content_kind | bot_candidate_id | decoy_id | is_trap | author_user_id | answer_text                                                              |
-|-------|----------|--------------|------------------|----------|---------|----------------|--------------------------------------------------------------------------|
-| `a1…` | `r1…`    | bot          | `b1…`            | *(null)* | false   | *(null)*       | Someone once told me to never accept criticism. Looking back…            |
-| `a2…` | `r1…`    | decoy        | *(null)*         | `dc1…`   | false   | `a1b2c3d4…`    | my uncle told me to dump my savings into beanie babies in 2003…          |
-| `a3…` | `r1…`    | decoy        | *(null)*         | `dc5…`   | false   | `c9d0e1f2…`    | 'just be yourself' before a job interview. myself does not want the job. |
-| `a4…` | `r1…`    | decoy        | *(null)*         | `dc6…`   | false   | `b5c6d7e8…`    | a teacher said don't rely on a calculator…                               |
+| id    | round_id | content_kind | bot_candidate_id | decoy_id | author_user_id | answer_text                                                              |
+|-------|----------|--------------|------------------|----------|----------------|--------------------------------------------------------------------------|
+| `a1…` | `r1…`    | bot          | `b1…`            | *(null)* | *(null)*       | Someone once told me to never accept criticism. Looking back…            |
+| `a2…` | `r1…`    | decoy        | *(null)*         | `dc1…`   | `a1b2c3d4…`    | my uncle told me to dump my savings into beanie babies in 2003…          |
+| `a3…` | `r1…`    | decoy        | *(null)*         | `dc5…`   | `c9d0e1f2…`    | 'just be yourself' before a job interview. myself does not want the job. |
+| `a4…` | `r1…`    | decoy        | *(null)*         | `dc6…`   | `b5c6d7e8…`    | a teacher said don't rely on a calculator…                               |
 
 ---
 

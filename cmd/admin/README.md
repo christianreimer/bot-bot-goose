@@ -115,7 +115,6 @@ bot). Each round is always 1 bot + 3 decoys; the answer slots reflect that.
           "slot": 0,
           "content_kind": "bot",
           "answer_text": "...",
-          "is_trap": false,
           "author_user_id": null,
           "bot_candidate_id": "uuid",
           "decoy_id": null

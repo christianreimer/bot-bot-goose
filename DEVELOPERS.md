@@ -163,7 +163,7 @@ Tracks the 14-step build order from the implementation plan. See [`BACKLOG.md`](
 - [x] **11. Originals leaderboard + line report share card** — `/leaderboard/originals`, `/leaderboard/spotters`, `/d/<short>`, post-reveal one-shot "felt most human?" vote, `Humans yesterday: X%` collective stat.
 - [x] **12. Pre-launch campaign** — `/prelaunch`, env-gated coming-soon poster (`BBG_PRELAUNCH_MODE`).
 - [x] **13. Launch capacity** — pgxpool sizing, ValKey caches at every hot read (users / rounds / OG / collective / streak / prelaunch pool), Postgres-fallback rate limiter, `/metrics` on a private listener.
-- [ ] **14. Adaptive difficulty + traps + seasons** — `spotter_elo`, `is_trap`, `target_count`, `seasons`, `events` columns exist; populators TODO.
+- [ ] **14. Adaptive difficulty + seasons** — `spotter_elo`, `target_count`, `seasons`, `events` columns exist; populators TODO. (The earlier `is_trap` boolean was dropped in 0002 — see BACKLOG for the rationale.)
 
 ## Limitations
 

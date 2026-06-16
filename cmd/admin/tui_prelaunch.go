@@ -374,9 +374,9 @@ type puzzleDetail struct {
 	catchTotal  *int
 }
 
-func approveCmd(ctx context.Context, d *db.DB, prelaunchID, reviewerID uuid.UUID, isTrap bool, note string) tea.Cmd {
+func approveCmd(ctx context.Context, d *db.DB, prelaunchID, reviewerID uuid.UUID, note string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := d.ApprovePrelaunch(ctx, prelaunchID, reviewerID, isTrap, note)
+		_, err := d.ApprovePrelaunch(ctx, prelaunchID, reviewerID, note)
 		return decisionDoneMsg{decision: "approved", err: err}
 	}
 }
@@ -1029,7 +1029,7 @@ func (m tuiModel) handleKeyReview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "G", "end":
 		m.subIndex = len(m.subs) - 1
 		return m, nil
-	case "a", "t", "r":
+	case "a", "r":
 		if decided {
 			m.flash = styleMuted.Render("already decided — read-only")
 			m.flashAt = time.Now()
@@ -1037,9 +1037,7 @@ func (m tuiModel) handleKeyReview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.String() {
 		case "a":
-			return m, approveCmd(m.ctx, m.db, cur.ID, m.reviewerID, false, note)
-		case "t":
-			return m, approveCmd(m.ctx, m.db, cur.ID, m.reviewerID, true, note)
+			return m, approveCmd(m.ctx, m.db, cur.ID, m.reviewerID, note)
 		case "r":
 			return m, rejectCmd(m.ctx, m.db, cur.ID, m.reviewerID, note)
 		}
@@ -1581,9 +1579,6 @@ func (m tuiModel) viewPuzzleDetail() string {
 			if a.IsBot {
 				label = styleKick.Render("BOT  ")
 			}
-			if a.IsTrap {
-				label += styleMuted.Render(" (trap)")
-			}
 			var picks string
 			if total > 0 {
 				pct := 0
@@ -1719,16 +1714,15 @@ func (m tuiModel) footer() string {
 		case m.noteOpen:
 			keys = "type note · enter confirm · esc cancel"
 		case m.subIndex < len(m.subs) && (m.subs[m.subIndex].IngestedDecoy != nil || m.subs[m.subIndex].RejectedAt != nil):
-			// Cursor row is already decided: a/t/r are no-ops because
+			// Cursor row is already decided: a/r are no-ops because
 			// reversal is not yet supported. Navigation still works,
 			// and the build keys are still live (they're per-prompt,
 			// not per-row).
 			keys = "↑↓ nav  " +
-				styleMuted.Render("a/t/r disabled (already decided)") + buildKeys + "  esc back  q quit"
+				styleMuted.Render("a/r disabled (already decided)") + buildKeys + "  esc back  q quit"
 		default:
 			keys = "↑↓ nav  " +
 				styleApprove.Render("a approve") + "  " +
-				styleApprove.Render("t trap") + "  " +
 				styleReject.Render("r reject") + "  " +
 				"n note" + buildKeys + "  esc back  q quit"
 		}

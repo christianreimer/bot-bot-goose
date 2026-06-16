@@ -106,8 +106,6 @@ Present 5–10 at a time. Watch for:
 - **AI-shaped** (long hedging sentences, em-dashes, generic positivity)
   → toss; the human pool must stay human.
 - **Duplicates** — keep the better-written one.
-- **Trap candidates** (human written to look bot-ish) → keep with
-  `--is-trap` so they tilt the realest-vote signal.
 
 Do not bulk-approve without the user's explicit OK.
 
@@ -116,12 +114,12 @@ Do not bulk-approve without the user's explicit OK.
 **Flag order matters.** All flags BEFORE the submission id:
 
 ```
-"$ADMIN" prelaunch review --decision approve [--is-trap] [--note "..."] <id>
-"$ADMIN" prelaunch review --decision reject                [--note "..."] <id>
+"$ADMIN" prelaunch review --decision approve [--note "..."] <id>
+"$ADMIN" prelaunch review --decision reject  [--note "..."] <id>
 ```
 
 Approve writes a `decoy_submissions` row (`status='approved'`, author
-preserved, optional `is_trap`), sets `pre_launch_submissions.ingested_decoy_id`,
+preserved), sets `pre_launch_submissions.ingested_decoy_id`,
 and writes `moderation_reviews` + `audit_log` in one transaction.
 
 Reject sets `pre_launch_submissions.rejected_at = NOW()` and writes the

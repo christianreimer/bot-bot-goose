@@ -66,7 +66,6 @@ type Answer struct {
 	ContentKind    ContentKind
 	BotCandidateID *uuid.UUID
 	DecoyID        *uuid.UUID
-	IsTrap         bool
 	AuthorUserID   *uuid.UUID
 	AnswerText     string
 }

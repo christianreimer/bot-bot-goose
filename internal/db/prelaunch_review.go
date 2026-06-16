@@ -195,13 +195,13 @@ var ErrPrelaunchAlreadyDecided = errors.New("prelaunch submission already decide
 // as a fresh approved decoy in a single transaction:
 //
 //  1. SELECT the pre_launch row (and lock it) — refuse if already decided.
-//  2. INSERT decoy_submissions (status='approved', author = pls.user_id, is_trap).
+//  2. INSERT decoy_submissions (status='approved', author = pls.user_id).
 //  3. UPDATE pre_launch_submissions.ingested_decoy_id = new decoy id.
 //  4. INSERT moderation_reviews (target_kind='pre_launch_submission').
 //  5. INSERT audit_log row.
 //
 // Returns the new decoy id so the caller can echo it back in the success envelope.
-func (d *DB) ApprovePrelaunch(ctx context.Context, prelaunchID, reviewerID uuid.UUID, isTrap bool, note string) (uuid.UUID, error) {
+func (d *DB) ApprovePrelaunch(ctx context.Context, prelaunchID, reviewerID uuid.UUID, note string) (uuid.UUID, error) {
 	tx, err := d.Begin(ctx)
 	if err != nil {
 		return uuid.Nil, err
@@ -234,10 +234,10 @@ func (d *DB) ApprovePrelaunch(ctx context.Context, prelaunchID, reviewerID uuid.
 
 	var newDecoyID uuid.UUID
 	err = tx.QueryRow(ctx, `
-		INSERT INTO decoy_submissions (prompt_id, user_id, text, status, is_trap)
-		VALUES ($1, $2, $3, 'approved', $4)
+		INSERT INTO decoy_submissions (prompt_id, user_id, text, status)
+		VALUES ($1, $2, $3, 'approved')
 		RETURNING id
-	`, promptID, userID, text, isTrap).Scan(&newDecoyID)
+	`, promptID, userID, text).Scan(&newDecoyID)
 	if err != nil {
 		return uuid.Nil, err
 	}
@@ -265,8 +265,8 @@ func (d *DB) ApprovePrelaunch(ctx context.Context, prelaunchID, reviewerID uuid.
 		INSERT INTO audit_log
 		    (actor_user_id, action, target_kind, target_id, payload)
 		VALUES ($1, 'prelaunch_approve', 'pre_launch_submission', $2,
-		        jsonb_build_object('decoy_id', $3::text, 'is_trap', $4::bool, 'note', $5::text))
-	`, reviewerID, prelaunchID, newDecoyID.String(), isTrap, notePtr); err != nil {
+		        jsonb_build_object('decoy_id', $3::text, 'note', $4::text))
+	`, reviewerID, prelaunchID, newDecoyID.String(), notePtr); err != nil {
 		return uuid.Nil, err
 	}
 

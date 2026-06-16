@@ -190,7 +190,6 @@ func puzzleShow(ctx context.Context, log *slog.Logger) error {
 		Slot           int     `json:"slot"`
 		ContentKind    string  `json:"content_kind"`
 		AnswerText     string  `json:"answer_text"`
-		IsTrap         bool    `json:"is_trap"`
 		AuthorUserID   *string `json:"author_user_id"`
 		BotCandidateID *string `json:"bot_candidate_id"`
 		DecoyID        *string `json:"decoy_id"`
@@ -215,7 +214,6 @@ func puzzleShow(ctx context.Context, log *slog.Logger) error {
 				Slot:           slot,
 				ContentKind:    string(a.ContentKind),
 				AnswerText:     a.AnswerText,
-				IsTrap:         a.IsTrap,
 				AuthorUserID:   uuidPtrToString(a.AuthorUserID),
 				BotCandidateID: uuidPtrToString(a.BotCandidateID),
 				DecoyID:        uuidPtrToString(a.DecoyID),

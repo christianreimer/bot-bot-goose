@@ -78,11 +78,13 @@ Each item links to the plan's build-order step it's part of.
 - Update `spotter_elo` on each completed play (K-factor TBD).
 - Composer reads each archetype's `difficulty` (already on `archetypes.difficulty`) and weights toward harder archetypes for higher-ELO players. Implementation note: the daily puzzle is shared globally, so adaptive *content* doesn't fit cleanly; the per-archetype rotation is the right knob.
 
-### Variable target count + traps (build-order step 13)
+### Variable target count (build-order step 13)
 
-**Why it matters.** "Find the one weird one" is the main exploit players develop. Variable target count breaks the assumption; traps (human decoys curated to look bot-ish) punish lazy "polished = bot" pattern-matching.
+**Why it matters.** "Find the one weird one" is the main exploit players develop. Variable target count (0 or 2 bots in a round instead of always 1) breaks the assumption.
 
-**Schema is ready** (`puzzle_rounds.target_count`, `puzzle_round_answers.is_trap`, `decoy_submissions.is_trap`). What's needed is composer logic to pick 0 or 2 bots occasionally, and reviewer-tagged traps to substitute into proven slots.
+**Schema is ready** (`puzzle_rounds.target_count`). What's needed is composer logic to pick 0 or 2 bots occasionally.
+
+The original plan also included reviewer-tagged "traps" (human decoys curated to look bot-ish) via `is_trap` columns on `decoy_submissions` + `puzzle_round_answers`. Those columns were removed in 0002_drop_is_trap.sql — the trap flag added a confusing reviewer choice (`a` vs `t`) whose effect was identical at gameplay time, and no logic ever consumed it. If the variable-target feature lands, the natural follow-up is to bring traps back as a *separate* signal (e.g. an `ai_likeness_score` derived from the existing `ai_detector_score`), not a hand-tagged boolean.
 
 ### Seasons + format rotation + analytics events (build-order step 14)
 

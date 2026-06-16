@@ -159,7 +159,6 @@ func prelaunchReview(ctx context.Context, log *slog.Logger) error {
 	dbf := registerDBFlags(fs)
 	decision := fs.String("decision", "", "approve|reject (required)")
 	note := fs.String("note", "", "moderation note")
-	isTrap := fs.Bool("is-trap", false, "approve as a trap decoy (curated to look bot-ish)")
 	reviewerEmail := fs.String("reviewer-email", envOr("BBG_REVIEWER_EMAIL", ""), "email of the reviewing user (required; also via BBG_REVIEWER_EMAIL)")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
@@ -178,9 +177,6 @@ func prelaunchReview(ctx context.Context, log *slog.Logger) error {
 	if *reviewerEmail == "" {
 		return emitError("invalid", "--reviewer-email (or BBG_REVIEWER_EMAIL) is required because moderation_reviews.reviewer_user_id is NOT NULL", nil)
 	}
-	if verb == "reject" && *isTrap {
-		return emitError("invalid", "--is-trap is only valid with --decision approve", nil)
-	}
 	d, err := openDB(ctx, dbf, log)
 	if err != nil {
 		return err
@@ -195,17 +191,16 @@ func prelaunchReview(ctx context.Context, log *slog.Logger) error {
 	}
 	switch verb {
 	case "approve":
-		newDecoyID, err := d.ApprovePrelaunch(ctx, prelaunchID, reviewerID, *isTrap, *note)
+		newDecoyID, err := d.ApprovePrelaunch(ctx, prelaunchID, reviewerID, *note)
 		if err != nil {
 			return prelaunchErr(err, prelaunchID)
 		}
 		log.Info("prelaunch approved", "id", prelaunchID, "decoy_id", newDecoyID, "reviewer", *reviewerEmail)
 		return emitOK("review", map[string]any{
-			"prelaunch_id":  prelaunchID.String(),
-			"decision":    "approve",
-			"decoy_id":    newDecoyID.String(),
-			"is_trap":     *isTrap,
-			"reviewer_id": reviewerID.String(),
+			"prelaunch_id": prelaunchID.String(),
+			"decision":     "approve",
+			"decoy_id":     newDecoyID.String(),
+			"reviewer_id":  reviewerID.String(),
 		})
 	case "reject":
 		if err := d.RejectPrelaunch(ctx, prelaunchID, reviewerID, *note); err != nil {
@@ -231,7 +226,6 @@ func prelaunchBulkReview(ctx context.Context, log *slog.Logger) error {
 	promptIDStr := fs.String("prompt-id", "", "only submissions for this prompt")
 	idsStr := fs.String("ids", "", "comma-separated prelaunch UUIDs (overrides --status/--prompt-id)")
 	note := fs.String("note", "", "moderation note applied to every row")
-	isTrap := fs.Bool("is-trap", false, "approve every row as a trap decoy")
 	reviewerEmail := fs.String("reviewer-email", envOr("BBG_REVIEWER_EMAIL", ""), "email of the reviewing user (required)")
 	limit := fs.Int("limit", 100, "safety cap on number of submissions reviewed")
 	if err := fs.Parse(os.Args[1:]); err != nil {
@@ -243,9 +237,6 @@ func prelaunchBulkReview(ctx context.Context, log *slog.Logger) error {
 	}
 	if *reviewerEmail == "" {
 		return emitError("invalid", "--reviewer-email (or BBG_REVIEWER_EMAIL) is required", nil)
-	}
-	if verb == "reject" && *isTrap {
-		return emitError("invalid", "--is-trap is only valid with --decision approve", nil)
 	}
 	d, err := openDB(ctx, dbf, log)
 	if err != nil {
@@ -311,7 +302,7 @@ func prelaunchBulkReview(ctx context.Context, log *slog.Logger) error {
 	for _, id := range targetIDs {
 		switch verb {
 		case "approve":
-			newDecoyID, err := d.ApprovePrelaunch(ctx, id, reviewerID, *isTrap, *note)
+			newDecoyID, err := d.ApprovePrelaunch(ctx, id, reviewerID, *note)
 			if err != nil {
 				out = append(out, result{ID: id.String(), Status: "failed", Error: err.Error(), ErrCode: codeForPrelaunchErr(err)})
 				continue

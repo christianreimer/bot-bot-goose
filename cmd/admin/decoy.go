@@ -354,15 +354,14 @@ func decoyToJSON(dc *db.Decoy) map[string]any {
 		deletedAt = &s
 	}
 	return map[string]any{
-		"id":             dc.ID.String(),
-		"prompt_id":      dc.PromptID.String(),
-		"prompt_text":    dc.PromptText,
-		"user_id":        userID,
-		"text":           dc.Text,
-		"status":         dc.Status,
-		"is_trap":        dc.IsTrap,
-		"ai_score":       dc.AIDetectorScore,
-		"submitted_at":   dc.SubmittedAt.UTC().Format(time.RFC3339),
-		"deleted_at":     deletedAt,
+		"id":           dc.ID.String(),
+		"prompt_id":    dc.PromptID.String(),
+		"prompt_text":  dc.PromptText,
+		"user_id":      userID,
+		"text":         dc.Text,
+		"status":       dc.Status,
+		"ai_score":     dc.AIDetectorScore,
+		"submitted_at": dc.SubmittedAt.UTC().Format(time.RFC3339),
+		"deleted_at":   deletedAt,
 	}
 }
