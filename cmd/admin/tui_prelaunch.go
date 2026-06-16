@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -94,6 +95,43 @@ const (
 	screenReview
 )
 
+// sortColumn identifies which column the prompt list is sorted by. The
+// numeric values double as the digit-keybinding (1..5) the operator
+// presses to switch column; pressing the same key flips the direction.
+type sortColumn int
+
+const (
+	sortPending  sortColumn = 1
+	sortIngested sortColumn = 2
+	sortRejected sortColumn = 3
+	sortPool     sortColumn = 4
+	sortPrompt   sortColumn = 5
+)
+
+func (c sortColumn) label() string {
+	switch c {
+	case sortPending:
+		return "PENDING"
+	case sortIngested:
+		return "INGESTED"
+	case sortRejected:
+		return "REJECTED"
+	case sortPool:
+		return "POOL"
+	case sortPrompt:
+		return "PROMPT"
+	}
+	return "?"
+}
+
+// defaultDesc returns the conventional initial direction when the operator
+// freshly switches to this column. Numbers default to descending ("show
+// me the biggest" — the prompts that need attention) and the text column
+// defaults to ascending alphabetic.
+func (c sortColumn) defaultDesc() bool {
+	return c != sortPrompt
+}
+
 // --- model ------------------------------------------------------------------
 
 type tuiModel struct {
@@ -112,6 +150,11 @@ type tuiModel struct {
 	// prompt-list view. Default ON so the operator opens straight into
 	// "what needs work right now." Toggled with 'p'.
 	pendingOnly bool
+
+	// sort state. Pressing 1..5 selects the column; pressing the active
+	// column's key again toggles direction.
+	sortCol  sortColumn
+	sortDesc bool
 
 	// review screen
 	subs            []db.PrelaunchSubmission
@@ -183,6 +226,8 @@ func runPrelaunchTUI(ctx context.Context, log *slog.Logger) error {
 		screen:        screenPrompts,
 		note:          ti,
 		pendingOnly:   true, // default to triage mode
+		sortCol:       sortPending,
+		sortDesc:      true, // most pending first — matches the historical SQL ORDER BY
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
@@ -414,6 +459,20 @@ func (m tuiModel) handleKeyPrompts(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pendingOnly = !m.pendingOnly
 		m.promptCursor = 0
 		return m, nil
+	case "1", "2", "3", "4", "5":
+		// Sort by column N (numeric label matches sortColumn const). Same
+		// key on the active column flips direction; switching to a new
+		// column adopts that column's conventional default (DESC for
+		// numbers, ASC for the prompt text).
+		col := sortColumn(int(msg.String()[0] - '0'))
+		if m.sortCol == col {
+			m.sortDesc = !m.sortDesc
+		} else {
+			m.sortCol = col
+			m.sortDesc = col.defaultDesc()
+		}
+		m.promptCursor = 0
+		return m, nil
 	case "enter":
 		visible := m.visiblePrompts()
 		if m.promptCursor >= len(visible) {
@@ -431,19 +490,50 @@ func (m tuiModel) handleKeyPrompts(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // visiblePrompts is the slice the prompt-list view + Enter handler operate
-// on — m.prompts filtered by pendingOnly. Kept as a method (recomputed each
-// access) instead of a cached field so any change to m.prompts or
-// m.pendingOnly flows through without an explicit recompute step.
+// on — m.prompts filtered by pendingOnly and sorted by the active sort
+// column. Kept as a method (recomputed each access) instead of a cached
+// field so any change to m.prompts / m.pendingOnly / m.sortCol / m.sortDesc
+// flows through without an explicit recompute step. The slice is always
+// freshly allocated so callers' sort.Slice() never reaches back and
+// reorders the underlying m.prompts.
 func (m tuiModel) visiblePrompts() []db.PrelaunchPromptRollup {
-	if !m.pendingOnly {
-		return m.prompts
-	}
 	out := make([]db.PrelaunchPromptRollup, 0, len(m.prompts))
 	for _, p := range m.prompts {
-		if p.Pending > 0 {
-			out = append(out, p)
+		if m.pendingOnly && p.Pending == 0 {
+			continue
 		}
+		out = append(out, p)
 	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		// Text column sorts on prompt text directly.
+		if m.sortCol == sortPrompt {
+			if m.sortDesc {
+				return a.PromptText > b.PromptText
+			}
+			return a.PromptText < b.PromptText
+		}
+		// Numeric columns: pull the int pair, then tiebreak on prompt
+		// text alphabetic so equal-count rows have a stable order.
+		var av, bv int
+		switch m.sortCol {
+		case sortPending:
+			av, bv = a.Pending, b.Pending
+		case sortIngested:
+			av, bv = a.Ingested, b.Ingested
+		case sortRejected:
+			av, bv = a.Rejected, b.Rejected
+		case sortPool:
+			av, bv = a.ApprovedDec, b.ApprovedDec
+		}
+		if av != bv {
+			if m.sortDesc {
+				return av > bv
+			}
+			return av < bv
+		}
+		return a.PromptText < b.PromptText
+	})
 	return out
 }
 
@@ -592,8 +682,15 @@ func (m tuiModel) viewPrompts() string {
 		end = total
 	}
 
+	// Column headers — bracket the active column with the sort indicator.
+	// The indicator stays a single visible character so column widths
+	// don't drift when the sort changes.
 	head := fmt.Sprintf("%*s %*s %*s %*s  %s",
-		wPending, "PENDING", wIng, "INGESTED", wRej, "REJECTED", wPool, "POOL", "PROMPT")
+		wPending, decorate("PENDING", sortPending, m),
+		wIng, decorate("INGESTED", sortIngested, m),
+		wRej, decorate("REJECTED", sortRejected, m),
+		wPool, decorate("POOL", sortPool, m),
+		decorate("PROMPT", sortPrompt, m))
 	out := []string{styleKick.Render(head)}
 
 	above := start
@@ -621,16 +718,33 @@ func (m tuiModel) viewPrompts() string {
 		out = append(out, "")
 	}
 
-	// Position indicator + active-filter hint
+	// Position indicator + active filter + active sort
 	filter := "all"
 	if m.pendingOnly {
 		filter = fmt.Sprintf("pending-only (p to show all %d)", len(m.prompts))
 	}
-	pos := styleMuted.Render(fmt.Sprintf("row %d of %d · filter: %s",
-		m.promptCursor+1, total, filter))
+	dir := "↑ asc"
+	if m.sortDesc {
+		dir = "↓ desc"
+	}
+	pos := styleMuted.Render(fmt.Sprintf("row %d of %d · filter: %s · sort: %s %s",
+		m.promptCursor+1, total, filter, m.sortCol.label(), dir))
 	out = append([]string{pos}, out...)
 
 	return strings.Join(out, "\n")
+}
+
+// decorate appends the sort-direction indicator to a column header when
+// that column is the active sort. Keeping the marker a single rune means
+// column widths stay stable across re-sorts.
+func decorate(label string, col sortColumn, m tuiModel) string {
+	if m.sortCol != col {
+		return label
+	}
+	if m.sortDesc {
+		return label + "↓"
+	}
+	return label + "↑"
 }
 
 func (m tuiModel) viewReview() string {
@@ -688,7 +802,7 @@ func (m tuiModel) footer() string {
 	var keys string
 	switch m.screen {
 	case screenPrompts:
-		keys = "↑↓ nav · f/b page · g/G top/bot · enter open · p toggle pending-only · r refresh · q quit"
+		keys = "↑↓ nav · f/b page · g/G top/bot · enter open · 1-5 sort · p toggle pending-only · r refresh · q quit"
 	case screenReview:
 		if m.noteOpen {
 			keys = "type note · enter confirm · esc cancel"
