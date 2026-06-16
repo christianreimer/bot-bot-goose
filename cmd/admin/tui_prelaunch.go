@@ -1,27 +1,35 @@
-// Interactive prelaunch review TUI built on bubbletea + lipgloss.
+// Interactive prelaunch review + puzzle authoring TUI built on bubbletea
+// + lipgloss. Tab cycles three top-level modes: REVIEW → UPCOMING →
+// HISTORY → REVIEW.
 //
-// Two screens:
+// REVIEW mode (default):
 //
-//   1. PROMPT LIST — every prompt with its pending/ingested/rejected counts
-//      and current approved-decoy pool size. Sorted by PENDING desc so the
-//      reviewer always opens the prompt that needs the most attention.
-//      Locked prompts (already in a built puzzle) are excluded.
+//   1. PROMPT LIST — every non-locked prompt with its pending/ingested/
+//      rejected counts and current approved pool size. Locked prompts
+//      (already baked into a built puzzle) are excluded — they live in
+//      UPCOMING / HISTORY.
 //
-//   2. REVIEW — the full list of submissions for one prompt, with per-row
-//      decisions. Cursor moves with ↑↓; a/t/r decide the cursored row and
-//      auto-advance to the next pending. Already-decided rows are read-only
-//      this iteration (reversal is a separate change).
-//        a   approve cursored row
-//        t   approve cursored row as trap
-//        r   reject cursored row
-//        n   open note input (attaches to the next decision)
-//        esc back to prompt list
-//        q   quit
+//   2. REVIEW — the full list of submissions for one prompt, with
+//      per-row decisions. Cursor moves with ↑↓; a/t/r decide the cursor
+//      row and auto-advance to the next pending. Already-decided rows
+//      are read-only this iteration (reversal is a separate change).
+//      Once ≥3 humans are approved, the screen grows a BOT LINE block:
+//        g   generate (random archetype, calls Anthropic)
+//        y   accept the generated bot
+//        m   make puzzle — assembles the next open round of the next
+//             daily_puzzle and locks the prompt
 //
-// Why a TUI and not a script: triage rhythm is "read line, decide, next."
-// Round-tripping through `bbg-admin prelaunch list/show/review` for every
-// row costs three subprocesses and a context switch each. The TUI keeps
-// the cursor in one place and the decisions in muscle memory.
+// UPCOMING / HISTORY modes:
+//
+//   - List of daily_puzzles, newest-first for history, soonest-first
+//     for upcoming.
+//   - Enter on a row drills in: 3 rounds × 4 answers each, with the
+//     bot highlighted and per-answer pick counts for history (data
+//     pulled from play_guesses + play_rounds.slot_permutation).
+//
+// Why a TUI and not a script: triage rhythm is "read line, decide,
+// next" — round-tripping through `bbg-admin prelaunch list/show/review`
+// for every row costs three subprocesses and a context switch each.
 package main
 
 import (
@@ -99,6 +107,17 @@ type screen int
 const (
 	screenPrompts screen = iota
 	screenReview
+	screenPuzzles       // list of either upcoming or past puzzles per puzzleMode
+	screenPuzzleDetail  // one puzzle's 3 rounds with answers + pick stats
+)
+
+// puzzleMode toggles screenPuzzles between "what's queued" and "what shipped."
+// Tab cycles screenPrompts → upcoming → history → screenPrompts.
+type puzzleMode int
+
+const (
+	puzzleModeUpcoming puzzleMode = iota
+	puzzleModeHistory
 )
 
 // sortColumn identifies which column the prompt list is sorted by. The
@@ -179,6 +198,16 @@ type tuiModel struct {
 	generating  bool
 	botPending  *generatedBot // non-nil once a candidate is in hand
 	botAccepted bool          // true after y → InsertApprovedBotLine
+
+	// upcoming / history mode state. Lifecycle: Tab cycles the mode,
+	// each switch triggers a fresh load of m.puzzles. Enter on a row
+	// loads m.detail and flips to screenPuzzleDetail.
+	puzzleMode    puzzleMode
+	puzzles       []db.DailyPuzzleListRow
+	puzzlesLoaded bool
+	puzzleCursor  int
+	detail        *puzzleDetail
+	detailLoaded  bool
 
 	// session stats
 	approved int
@@ -332,6 +361,19 @@ type generatedBot struct {
 	botID uuid.UUID
 }
 
+// puzzleDetail is the data the detail view renders: 3 rounds, each with
+// its prompt + 4 answers + per-answer pick counts. catchPct is the
+// frozen daily_collective_stats value (nil before the nightly rollup
+// has run, which is normal for the same-day or future puzzles).
+type puzzleDetail struct {
+	puzzle      db.DailyPuzzle
+	rounds      []db.PuzzleRound
+	answers     [][]db.RoundAnswerStat // outer index = round_index
+	totalPlays  []int                   // per round (typically equal)
+	catchPct    *int
+	catchTotal  *int
+}
+
 func approveCmd(ctx context.Context, d *db.DB, prelaunchID, reviewerID uuid.UUID, isTrap bool, note string) tea.Cmd {
 	return func() tea.Msg {
 		_, err := d.ApprovePrelaunch(ctx, prelaunchID, reviewerID, isTrap, note)
@@ -343,6 +385,78 @@ func rejectCmd(ctx context.Context, d *db.DB, prelaunchID, reviewerID uuid.UUID,
 	return func() tea.Msg {
 		err := d.RejectPrelaunch(ctx, prelaunchID, reviewerID, note)
 		return decisionDoneMsg{decision: "rejected", err: err}
+	}
+}
+
+// --- upcoming/history messages + commands -----------------------------------
+
+type puzzlesLoadedMsg struct {
+	mode    puzzleMode
+	puzzles []db.DailyPuzzleListRow
+	err     error
+}
+
+type puzzleDetailLoadedMsg struct {
+	detail *puzzleDetail
+	err    error
+}
+
+// loadPuzzlesCmd fetches the upcoming or historical list. Upcoming is
+// puzzle_date >= today (no upper bound); history is the most-recent
+// past 100 puzzles ordered newest-first. The 100-row cap on history
+// keeps load time bounded as the archive grows; older puzzles are
+// queryable through `bbg-admin puzzle list` if needed.
+func loadPuzzlesCmd(ctx context.Context, d *db.DB, mode puzzleMode) tea.Cmd {
+	return func() tea.Msg {
+		today := time.Now().UTC().Truncate(24 * time.Hour)
+		switch mode {
+		case puzzleModeUpcoming:
+			ps, err := d.ListDailyPuzzlesWithFirstPrompt(ctx, db.PuzzleListOpts{
+				From: &today, Limit: 0,
+			})
+			return puzzlesLoadedMsg{mode: mode, puzzles: ps, err: err}
+		case puzzleModeHistory:
+			// To = yesterday (today - 1ns to make the inclusive-date filter exclude today)
+			endOfYesterday := today.Add(-time.Nanosecond)
+			ps, err := d.ListDailyPuzzlesWithFirstPrompt(ctx, db.PuzzleListOpts{
+				To: &endOfYesterday, IncludePast: true, Limit: 100,
+			})
+			// History wants newest-first; the list query returns ASC.
+			for i, j := 0, len(ps)-1; i < j; i, j = i+1, j-1 {
+				ps[i], ps[j] = ps[j], ps[i]
+			}
+			return puzzlesLoadedMsg{mode: mode, puzzles: ps, err: err}
+		}
+		return puzzlesLoadedMsg{mode: mode, err: fmt.Errorf("unknown puzzle mode")}
+	}
+}
+
+// loadPuzzleDetailCmd assembles the full detail of one puzzle: its 3
+// rounds (with prompt text), each round's 4 answers + pick counts, and
+// the collective catch-rate from the nightly rollup (if available).
+func loadPuzzleDetailCmd(ctx context.Context, d *db.DB, p db.DailyPuzzle) tea.Cmd {
+	return func() tea.Msg {
+		det := &puzzleDetail{puzzle: p}
+		rounds, err := d.Rounds(ctx, p.ID)
+		if err != nil {
+			return puzzleDetailLoadedMsg{err: fmt.Errorf("rounds: %w", err)}
+		}
+		det.rounds = rounds
+		det.answers = make([][]db.RoundAnswerStat, len(rounds))
+		det.totalPlays = make([]int, len(rounds))
+		for i, r := range rounds {
+			stats, total, err := d.RoundAnswerStats(ctx, r.ID, p.ID, r.RoundIndex)
+			if err != nil {
+				return puzzleDetailLoadedMsg{err: fmt.Errorf("round %d stats: %w", r.RoundIndex, err)}
+			}
+			det.answers[i] = stats
+			det.totalPlays[i] = total
+		}
+		if pct, total, err := d.CollectiveCatchPct(ctx, p.PuzzleNumber); err == nil {
+			det.catchPct = &pct
+			det.catchTotal = &total
+		}
+		return puzzleDetailLoadedMsg{detail: det}
 	}
 }
 
@@ -428,6 +542,65 @@ func assembleRoundCmd(ctx context.Context, d *db.DB, promptID, botID uuid.UUID, 
 			sealed:       op.RoundsFilled == 2,
 		}
 	}
+}
+
+// handleKeyPuzzles drives the upcoming/history list (mode is m.puzzleMode).
+// Tab is handled one level up to cycle modes; this handles within-list nav.
+func (m tuiModel) handleKeyPuzzles(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	last := len(m.puzzles) - 1
+	pageStep := m.height - 9
+	if pageStep < 5 {
+		pageStep = 10
+	}
+	switch msg.String() {
+	case "down", "j":
+		if m.puzzleCursor < last {
+			m.puzzleCursor++
+		}
+		return m, nil
+	case "up", "k":
+		if m.puzzleCursor > 0 {
+			m.puzzleCursor--
+		}
+		return m, nil
+	case "pgdown", "ctrl+f", "f":
+		m.puzzleCursor += pageStep
+		if m.puzzleCursor > last {
+			m.puzzleCursor = last
+		}
+		return m, nil
+	case "pgup", "ctrl+b", "b":
+		m.puzzleCursor -= pageStep
+		if m.puzzleCursor < 0 {
+			m.puzzleCursor = 0
+		}
+		return m, nil
+	case "home":
+		m.puzzleCursor = 0
+		return m, nil
+	case "end", "G":
+		m.puzzleCursor = last
+		if m.puzzleCursor < 0 {
+			m.puzzleCursor = 0
+		}
+		return m, nil
+	case "r":
+		m.puzzlesLoaded = false
+		return m, loadPuzzlesCmd(m.ctx, m.db, m.puzzleMode)
+	case "enter":
+		if m.puzzleCursor < 0 || m.puzzleCursor >= len(m.puzzles) {
+			return m, nil
+		}
+		return m, loadPuzzleDetailCmd(m.ctx, m.db, m.puzzles[m.puzzleCursor].DailyPuzzle)
+	}
+	return m, nil
+}
+
+// handleKeyPuzzleDetail: detail view is read-only. Just esc/q (handled
+// at the outer level). Future iteration could add up/down to scroll
+// long puzzles, but 3 rounds × 4 answers always fits.
+func (m tuiModel) handleKeyPuzzleDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	return m, nil
 }
 
 // approvedDecoyIDsForPrompt returns the IDs of approved decoys produced
@@ -558,6 +731,29 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.screen = screenPrompts
 		return m, loadPromptsCmd(m.ctx, m.db)
 
+	case puzzlesLoadedMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, tea.Quit
+		}
+		m.puzzles = msg.puzzles
+		m.puzzleMode = msg.mode
+		m.puzzlesLoaded = true
+		m.puzzleCursor = 0
+		return m, nil
+
+	case puzzleDetailLoadedMsg:
+		if msg.err != nil {
+			m.flash = styleReject.Render("detail: " + msg.err.Error())
+			m.flashAt = time.Now()
+			m.screen = screenPuzzles
+			return m, nil
+		}
+		m.detail = msg.detail
+		m.detailLoaded = true
+		m.screen = screenPuzzleDetail
+		return m, nil
+
 	case decisionDoneMsg:
 		if msg.err != nil {
 			if errors.Is(msg.err, db.ErrPrelaunchAlreadyDecided) {
@@ -625,19 +821,55 @@ func (m tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "esc":
-		if m.screen == screenReview {
+		switch m.screen {
+		case screenReview:
 			m.screen = screenPrompts
 			m.subs = nil
 			m.subIndex = 0
+			return m, loadPromptsCmd(m.ctx, m.db)
+		case screenPuzzles:
+			m.screen = screenPrompts
+			return m, loadPromptsCmd(m.ctx, m.db)
+		case screenPuzzleDetail:
+			m.screen = screenPuzzles
+			m.detail = nil
+			m.detailLoaded = false
+			return m, nil
+		}
+		return m, nil
+
+	case "tab":
+		// Cycle: prompts → upcoming puzzles → history → prompts.
+		// Tab is inert inside the review/detail subscreens (esc out first).
+		switch m.screen {
+		case screenPrompts:
+			m.screen = screenPuzzles
+			m.puzzleMode = puzzleModeUpcoming
+			m.puzzlesLoaded = false
+			return m, loadPuzzlesCmd(m.ctx, m.db, puzzleModeUpcoming)
+		case screenPuzzles:
+			if m.puzzleMode == puzzleModeUpcoming {
+				m.puzzleMode = puzzleModeHistory
+				m.puzzlesLoaded = false
+				return m, loadPuzzlesCmd(m.ctx, m.db, puzzleModeHistory)
+			}
+			m.screen = screenPrompts
 			return m, loadPromptsCmd(m.ctx, m.db)
 		}
 		return m, nil
 	}
 
-	if m.screen == screenPrompts {
+	switch m.screen {
+	case screenPrompts:
 		return m.handleKeyPrompts(msg)
+	case screenReview:
+		return m.handleKeyReview(msg)
+	case screenPuzzles:
+		return m.handleKeyPuzzles(msg)
+	case screenPuzzleDetail:
+		return m.handleKeyPuzzleDetail(msg)
 	}
-	return m.handleKeyReview(msg)
+	return m, nil
 }
 
 func (m tuiModel) handleKeyPrompts(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -935,23 +1167,50 @@ func (m tuiModel) View() string {
 		b.WriteString(m.viewPrompts())
 	case screenReview:
 		b.WriteString(m.viewReview())
+	case screenPuzzles:
+		b.WriteString(m.viewPuzzles())
+	case screenPuzzleDetail:
+		b.WriteString(m.viewPuzzleDetail())
 	}
 	b.WriteString("\n")
 	b.WriteString(m.footer())
 	return b.String()
 }
 
+// modeChip renders a single mode tab in the header. Active tab gets
+// honk-orange highlight; the others are muted. Tabs visually anchor the
+// reviewer's current location and the Tab cycle order: REVIEW → UPCOMING
+// → HISTORY → REVIEW.
+func (m tuiModel) modeChip(label string, active bool) string {
+	if active {
+		return styleKick.Render("▣ " + label)
+	}
+	return styleMuted.Render("▫ " + label)
+}
+
 func (m tuiModel) header() string {
-	left := styleBrand.Render("🪿  bot bot goose") + styleMuted.Render(" · prelaunch review")
+	left := styleBrand.Render("🪿  bot bot goose")
+	// Mode chips reflect the screen the reviewer is on. The review and
+	// puzzle subscreens (review one prompt / view one puzzle) inherit
+	// their parent list's chip so the reviewer never loses their place.
+	reviewActive := m.screen == screenPrompts || m.screen == screenReview
+	upcomingActive := (m.screen == screenPuzzles || m.screen == screenPuzzleDetail) && m.puzzleMode == puzzleModeUpcoming
+	historyActive := (m.screen == screenPuzzles || m.screen == screenPuzzleDetail) && m.puzzleMode == puzzleModeHistory
+	chips := strings.Join([]string{
+		m.modeChip("REVIEW", reviewActive),
+		m.modeChip("UPCOMING", upcomingActive),
+		m.modeChip("HISTORY", historyActive),
+	}, "  ")
 	right := fmt.Sprintf("%s %d  %s %d",
 		styleApprove.Render("approved"), m.approved,
 		styleReject.Render("rejected"), m.rejected,
 	)
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
+	leftBlock := left + "  " + chips
+	gap := m.width - lipgloss.Width(leftBlock) - lipgloss.Width(right)
 	if gap < 2 {
 		gap = 2
 	}
-	line := left + strings.Repeat(" ", gap) + right
+	line := leftBlock + strings.Repeat(" ", gap) + right
 	rule := styleRule.Render(strings.Repeat("─", maxInt(m.width, 40)))
 	return line + "\n" + rule
 }
@@ -1194,6 +1453,174 @@ func (m tuiModel) viewReview() string {
 	return strings.Join(parts, "\n")
 }
 
+// viewPuzzles renders the upcoming-or-history list. Columns: puzzle#,
+// date, sealed/open marker, and the round-0 prompt as a snippet so the
+// reviewer can identify the puzzle without drilling in.
+func (m tuiModel) viewPuzzles() string {
+	if !m.puzzlesLoaded {
+		return styleMuted.Render("loading…")
+	}
+	if len(m.puzzles) == 0 {
+		switch m.puzzleMode {
+		case puzzleModeUpcoming:
+			return styleMuted.Render("no upcoming puzzles. press tab to flip to history, or back out (esc) to start building.")
+		case puzzleModeHistory:
+			return styleMuted.Render("no historical puzzles yet.")
+		}
+	}
+
+	// Column widths
+	const (
+		wNum  = 6
+		wDate = 12
+		wRds  = 6
+	)
+	wPrompt := m.width - wNum - wDate - wRds - 6
+	if wPrompt < 20 {
+		wPrompt = 20
+	}
+
+	// Viewport math (matches viewPrompts).
+	const chrome = 6 + 1 + 2
+	rowsAvailable := m.height - chrome
+	if rowsAvailable < 5 {
+		rowsAvailable = len(m.puzzles)
+	}
+	total := len(m.puzzles)
+	start := 0
+	if total > rowsAvailable {
+		if m.puzzleCursor < rowsAvailable-1 {
+			start = 0
+		} else if m.puzzleCursor >= total-1 {
+			start = total - rowsAvailable
+		} else {
+			start = m.puzzleCursor - rowsAvailable/2
+			if start < 0 {
+				start = 0
+			}
+			if start+rowsAvailable > total {
+				start = total - rowsAvailable
+			}
+		}
+	}
+	end := start + rowsAvailable
+	if end > total {
+		end = total
+	}
+
+	head := fmt.Sprintf("%*s  %*s  %*s  %s",
+		wNum, "#", wDate, "DATE", wRds, "RDS", "ROUND 0 PROMPT")
+	out := []string{styleKick.Render(head)}
+
+	above := start
+	if above > 0 {
+		out = append(out, styleMuted.Render(fmt.Sprintf("↑ %d more above", above)))
+	} else {
+		out = append(out, "")
+	}
+
+	for i := start; i < end; i++ {
+		p := m.puzzles[i]
+		rds := fmt.Sprintf("%d/3", p.RoundCount)
+		ptext := p.FirstPromptText
+		if ptext == "" {
+			ptext = styleMuted.Render("(no rounds yet)")
+		}
+		row := fmt.Sprintf("%*d  %*s  %*s  %s",
+			wNum, p.PuzzleNumber, wDate, p.PuzzleDate.Format("2006-01-02"),
+			wRds, rds, truncateW(ptext, wPrompt))
+		if i == m.puzzleCursor {
+			row = styleSelected.Render(row)
+		}
+		out = append(out, row)
+	}
+
+	below := total - end
+	if below > 0 {
+		out = append(out, styleMuted.Render(fmt.Sprintf("↓ %d more below", below)))
+	} else {
+		out = append(out, "")
+	}
+
+	mode := "upcoming"
+	if m.puzzleMode == puzzleModeHistory {
+		mode = "history"
+	}
+	pos := styleMuted.Render(fmt.Sprintf("row %d of %d · %s", m.puzzleCursor+1, total, mode))
+	out = append([]string{pos}, out...)
+	return strings.Join(out, "\n")
+}
+
+// viewPuzzleDetail renders the 3 rounds + 4 answers each, with per-answer
+// pick stats when the puzzle has been played. The bot row gets a honk-
+// orange highlight so it's obvious which one was the AI.
+func (m tuiModel) viewPuzzleDetail() string {
+	if !m.detailLoaded || m.detail == nil {
+		return styleMuted.Render("loading…")
+	}
+	d := m.detail
+	hdr := fmt.Sprintf("PUZZLE #%d  ·  %s",
+		d.puzzle.PuzzleNumber, d.puzzle.PuzzleDate.Format("2006-01-02"))
+	if d.catchPct != nil && d.catchTotal != nil {
+		hdr += fmt.Sprintf("  ·  catch rate %s of %d plays",
+			styleApprove.Render(fmt.Sprintf("%d%%", *d.catchPct)),
+			*d.catchTotal)
+	} else if anyPlays(d.totalPlays) {
+		hdr += "  ·  " + styleMuted.Render("rollup pending")
+	}
+
+	parts := []string{styleKick.Render(hdr), ""}
+	for i, r := range d.rounds {
+		parts = append(parts, styleKick.Render(fmt.Sprintf("ROUND %d", r.RoundIndex+1)),
+			stylePrompt.Render(r.PromptText))
+		stats := d.answers[i]
+		total := d.totalPlays[i]
+		for _, a := range stats {
+			label := "HUMAN"
+			text := a.Text
+			if a.IsBot {
+				label = styleKick.Render("BOT  ")
+			}
+			if a.IsTrap {
+				label += styleMuted.Render(" (trap)")
+			}
+			var picks string
+			if total > 0 {
+				pct := 0
+				if total > 0 {
+					pct = (a.Picks * 100) / total
+				}
+				picks = fmt.Sprintf("%5d picks · %3d%%", a.Picks, pct)
+			} else {
+				picks = styleMuted.Render("        no plays yet")
+			}
+			row := fmt.Sprintf("  %s  %s  %s",
+				label, picks, truncateW(singleLine(text), m.width-32))
+			if a.IsBot {
+				row = styleKick.Render(row)
+			}
+			parts = append(parts, row)
+		}
+		if total > 0 {
+			parts = append(parts, styleMuted.Render(fmt.Sprintf("  total: %d plays", total)))
+		}
+		parts = append(parts, "")
+	}
+	return strings.Join(parts, "\n")
+}
+
+// anyPlays reports whether at least one round of the detail has plays.
+// Drives the "rollup pending" hint vs. omitting catch-rate context
+// entirely for upcoming puzzles.
+func anyPlays(per []int) bool {
+	for _, n := range per {
+		if n > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // viewBotSection renders the bot-line region of the review screen. Three
 // states:
 //   - none: prompt to press `g` (with the LLM model id)
@@ -1261,7 +1688,18 @@ func (m tuiModel) footer() string {
 	var keys string
 	switch m.screen {
 	case screenPrompts:
-		keys = "↑↓ nav · f/b page · g/G top/bot · enter open · 1-5 sort · p toggle pending-only · r refresh · q quit"
+		keys = "↑↓ nav · f/b page · enter open · 1-5 sort · p pending-only · r refresh · tab→upcoming · q quit"
+	case screenPuzzles:
+		mode := "upcoming"
+		nextMode := "history"
+		if m.puzzleMode == puzzleModeHistory {
+			mode = "history"
+			nextMode = "review"
+		}
+		_ = mode
+		keys = fmt.Sprintf("↑↓ nav · enter open · r refresh · tab→%s · esc back · q quit", nextMode)
+	case screenPuzzleDetail:
+		keys = "esc back · q quit"
 	case screenReview:
 		// Build-mode keys show up once 3+ humans are approved on this
 		// prompt — that's when the bot section becomes interactive.

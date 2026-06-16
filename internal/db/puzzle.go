@@ -431,6 +431,63 @@ func (d *DB) ListDailyPuzzles(ctx context.Context, opts PuzzleListOpts) ([]Daily
 	return out, rows.Err()
 }
 
+// DailyPuzzleListRow is a list-view row: puzzle metadata + the round-0
+// prompt text, fetched in one query so the TUI doesn't N+1 across the
+// list during render.
+type DailyPuzzleListRow struct {
+	DailyPuzzle
+	FirstPromptText string
+	RoundCount      int
+}
+
+// ListDailyPuzzlesWithFirstPrompt is the bulk-fetch variant of
+// ListDailyPuzzles used by the prelaunch TUI's upcoming/history views.
+// One query returns the puzzle row plus its round-0 prompt text plus
+// its round count, avoiding a per-row FirstRoundPromptText + Rounds
+// subquery in the render loop.
+func (d *DB) ListDailyPuzzlesWithFirstPrompt(ctx context.Context, opts PuzzleListOpts) ([]DailyPuzzleListRow, error) {
+	q := `SELECT dp.id, dp.puzzle_number, dp.puzzle_date, dp.frozen_at, dp.theme,
+	             COALESCE(p.text, ''),
+	             (SELECT COUNT(*) FROM puzzle_rounds pr WHERE pr.daily_puzzle_id = dp.id)
+	        FROM daily_puzzles dp
+	        LEFT JOIN puzzle_rounds r0 ON r0.daily_puzzle_id = dp.id AND r0.round_index = 0
+	        LEFT JOIN prompts p ON p.id = r0.prompt_id
+	       WHERE 1=1`
+	args := []any{}
+	if opts.From != nil {
+		args = append(args, *opts.From)
+		q += fmt.Sprintf(" AND dp.puzzle_date >= $%d", len(args))
+	} else if !opts.IncludePast {
+		today := time.Now().UTC().Truncate(24 * time.Hour)
+		args = append(args, today)
+		q += fmt.Sprintf(" AND dp.puzzle_date >= $%d", len(args))
+	}
+	if opts.To != nil {
+		args = append(args, *opts.To)
+		q += fmt.Sprintf(" AND dp.puzzle_date <= $%d", len(args))
+	}
+	q += " ORDER BY dp.puzzle_date ASC, dp.puzzle_number ASC"
+	if opts.Limit > 0 {
+		args = append(args, opts.Limit)
+		q += fmt.Sprintf(" LIMIT $%d", len(args))
+	}
+	rows, err := d.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DailyPuzzleListRow
+	for rows.Next() {
+		var r DailyPuzzleListRow
+		if err := rows.Scan(&r.ID, &r.PuzzleNumber, &r.PuzzleDate, &r.FrozenAt, &r.Theme,
+			&r.FirstPromptText, &r.RoundCount); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // PuzzleByDate finds the puzzle for an exact date. Useful for `--date` lookups.
 func (d *DB) PuzzleByDate(ctx context.Context, date time.Time) (*DailyPuzzle, error) {
 	const q = `SELECT id, puzzle_number, puzzle_date, frozen_at, theme
@@ -785,6 +842,92 @@ func (d *DB) PuzzlePlayCount(ctx context.Context, puzzleID uuid.UUID) (int, erro
 	var n int
 	err := d.QueryRow(ctx, `SELECT COUNT(*) FROM plays WHERE daily_puzzle_id = $1`, puzzleID).Scan(&n)
 	return n, err
+}
+
+// RoundAnswerStat is one puzzle_round_answers row with its display-relevant
+// metadata + per-answer pick counts derived from play_guesses. Picks is 0
+// for upcoming puzzles (no plays yet).
+type RoundAnswerStat struct {
+	AnswerID uuid.UUID
+	IsBot    bool
+	IsTrap   bool
+	Text     string
+	Picks    int
+}
+
+// RoundAnswerStats returns the 4 answers of a round in canonical order
+// (by id ASC) along with how many players picked each as "the bot."
+//
+// The math: for each play_round of the same round_index in the same
+// puzzle, slot_permutation maps visible slot → canonical ordinal. A
+// play_guess records the visible slot the player tapped; we look up the
+// canonical ordinal at that slot to know which answer they picked.
+//
+// PG arrays are 1-indexed when subscripted in SQL but the schema stores
+// 0-based ordinals, hence slot_permutation[pg.slot + 1].
+func (d *DB) RoundAnswerStats(ctx context.Context, roundID, puzzleID uuid.UUID, roundIndex int16) ([]RoundAnswerStat, int, error) {
+	rows, err := d.Query(ctx, `
+		WITH answers AS (
+		    SELECT id, content_kind, is_trap, answer_text,
+		           (ROW_NUMBER() OVER (ORDER BY id) - 1)::int AS canonical_ord
+		      FROM puzzle_round_answers
+		     WHERE round_id = $1
+		),
+		plays_for_round AS (
+		    SELECT plr.id, plr.slot_permutation
+		      FROM play_rounds plr
+		      JOIN plays p ON p.id = plr.play_id
+		     WHERE p.daily_puzzle_id = $2 AND plr.round_index = $3
+		),
+		guesses AS (
+		    SELECT pfr.slot_permutation[pg.slot + 1] AS canonical_pick
+		      FROM plays_for_round pfr
+		      JOIN play_guesses pg ON pg.play_round_id = pfr.id
+		)
+		SELECT a.id,
+		       a.content_kind = 'bot',
+		       a.is_trap,
+		       a.answer_text,
+		       COALESCE(COUNT(g.canonical_pick), 0)::int AS picks,
+		       (SELECT COUNT(*) FROM plays_for_round)::int AS total_plays
+		  FROM answers a
+		  LEFT JOIN guesses g ON g.canonical_pick = a.canonical_ord
+		 GROUP BY a.id, a.content_kind, a.is_trap, a.answer_text, a.canonical_ord
+		 ORDER BY a.canonical_ord
+	`, roundID, puzzleID, roundIndex)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var out []RoundAnswerStat
+	var totalPlays int
+	for rows.Next() {
+		var r RoundAnswerStat
+		if err := rows.Scan(&r.AnswerID, &r.IsBot, &r.IsTrap, &r.Text, &r.Picks, &totalPlays); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, r)
+	}
+	return out, totalPlays, rows.Err()
+}
+
+// CollectiveCatchPct returns the frozen catch-percentage for a puzzle
+// from daily_collective_stats, or ErrNotFound if the nightly rollup
+// hasn't computed it yet (typically because the puzzle is still live or
+// under the MinPlaysFloor).
+func (d *DB) CollectiveCatchPct(ctx context.Context, puzzleNumber int32) (catchPct, totalPlays int, err error) {
+	err = d.QueryRow(ctx, `
+		SELECT catch_pct, total_plays
+		  FROM daily_collective_stats
+		 WHERE puzzle_number = $1
+	`, puzzleNumber).Scan(&catchPct, &totalPlays)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, 0, ErrNotFound
+		}
+		return 0, 0, err
+	}
+	return catchPct, totalPlays, nil
 }
 
 // FirstRoundPromptText returns the round-0 prompt text for a puzzle. Returns
