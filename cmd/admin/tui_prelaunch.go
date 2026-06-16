@@ -108,6 +108,10 @@ type tuiModel struct {
 	prompts       []db.PrelaunchPromptRollup
 	promptsLoaded bool
 	promptCursor  int
+	// pendingOnly hides prompts with no pending submissions from the
+	// prompt-list view. Default ON so the operator opens straight into
+	// "what needs work right now." Toggled with 'p'.
+	pendingOnly bool
 
 	// review screen
 	subs            []db.PrelaunchSubmission
@@ -178,6 +182,7 @@ func runPrelaunchTUI(ctx context.Context, log *slog.Logger) error {
 		reviewerEmail: *reviewerEmail,
 		screen:        screenPrompts,
 		note:          ti,
+		pendingOnly:   true, // default to triage mode
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
@@ -358,6 +363,10 @@ func (m tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) handleKeyPrompts(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Operate on the filtered slice so cursor bounds reflect what the
+	// operator actually sees on screen.
+	visible := m.visiblePrompts()
+	last := len(visible) - 1
 	// A reasonable page-step for full-page jumps. We don't have the rendered
 	// viewport height in scope here so approximate from the terminal height
 	// minus chrome — matches what viewPrompts uses to compute its window.
@@ -367,7 +376,7 @@ func (m tuiModel) handleKeyPrompts(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "down", "j":
-		if m.promptCursor < len(m.prompts)-1 {
+		if m.promptCursor < last {
 			m.promptCursor++
 		}
 		return m, nil
@@ -378,8 +387,8 @@ func (m tuiModel) handleKeyPrompts(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "pgdown", "ctrl+f", "f":
 		m.promptCursor += pageStep
-		if m.promptCursor > len(m.prompts)-1 {
-			m.promptCursor = len(m.prompts) - 1
+		if m.promptCursor > last {
+			m.promptCursor = last
 		}
 		return m, nil
 	case "pgup", "ctrl+b", "b":
@@ -392,18 +401,25 @@ func (m tuiModel) handleKeyPrompts(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.promptCursor = 0
 		return m, nil
 	case "G", "end":
-		m.promptCursor = len(m.prompts) - 1
+		m.promptCursor = last
 		if m.promptCursor < 0 {
 			m.promptCursor = 0
 		}
 		return m, nil
 	case "r":
 		return m, loadPromptsCmd(m.ctx, m.db)
+	case "p":
+		// Toggle pending-only filter. Reset cursor so we don't end up
+		// pointing at a row that just disappeared from the visible set.
+		m.pendingOnly = !m.pendingOnly
+		m.promptCursor = 0
+		return m, nil
 	case "enter":
-		if m.promptCursor >= len(m.prompts) {
+		visible := m.visiblePrompts()
+		if m.promptCursor >= len(visible) {
 			return m, nil
 		}
-		p := m.prompts[m.promptCursor]
+		p := visible[m.promptCursor]
 		if p.Pending == 0 {
 			m.flash = "no pending submissions for that prompt"
 			m.flashAt = time.Now()
@@ -412,6 +428,23 @@ func (m tuiModel) handleKeyPrompts(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, loadSubsCmd(m.ctx, m.db, p.PromptID)
 	}
 	return m, nil
+}
+
+// visiblePrompts is the slice the prompt-list view + Enter handler operate
+// on — m.prompts filtered by pendingOnly. Kept as a method (recomputed each
+// access) instead of a cached field so any change to m.prompts or
+// m.pendingOnly flows through without an explicit recompute step.
+func (m tuiModel) visiblePrompts() []db.PrelaunchPromptRollup {
+	if !m.pendingOnly {
+		return m.prompts
+	}
+	out := make([]db.PrelaunchPromptRollup, 0, len(m.prompts))
+	for _, p := range m.prompts {
+		if p.Pending > 0 {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func (m tuiModel) handleKeyReview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -498,6 +531,14 @@ func (m tuiModel) viewPrompts() string {
 	if len(m.prompts) == 0 {
 		return styleMuted.Render("no prompts in the database — load some via `bbg-admin import`")
 	}
+	visible := m.visiblePrompts()
+	if len(visible) == 0 {
+		// Filter is on but nothing matches. Most likely "pendingOnly is
+		// on, no prompts have pending submissions" — successful empty
+		// state, not an error. Tell the operator how to see the rest.
+		return styleMuted.Render("nothing pending. press p to show all prompts, r to refresh.")
+	}
+
 	// Column widths
 	const (
 		wPending = 8
@@ -520,14 +561,14 @@ func (m tuiModel) viewPrompts() string {
 		// Either height isn't known yet (WindowSizeMsg pending) or the
 		// terminal is tiny. Render everything and let the operator scroll
 		// their terminal — degrading gracefully beats clipping silently.
-		rowsAvailable = len(m.prompts)
+		rowsAvailable = len(visible)
 	}
 
 	// Cursor-following window: keep the selected row in view. If the
 	// cursor drifts off the bottom, scroll just enough to keep it; same
 	// for the top. Center-on-cursor would be smoother but the jitter is
 	// distracting during fast j/k navigation.
-	total := len(m.prompts)
+	total := len(visible)
 	start := 0
 	if total > rowsAvailable {
 		// Keep a 1-row buffer above and below where possible.
@@ -563,7 +604,7 @@ func (m tuiModel) viewPrompts() string {
 	}
 
 	for i := start; i < end; i++ {
-		p := m.prompts[i]
+		p := visible[i]
 		text := truncateW(p.PromptText, wPrompt)
 		row := fmt.Sprintf("%*d %*d %*d %*d  %s",
 			wPending, p.Pending, wIng, p.Ingested, wRej, p.Rejected, wPool, p.ApprovedDec, text)
@@ -580,9 +621,13 @@ func (m tuiModel) viewPrompts() string {
 		out = append(out, "")
 	}
 
-	// Position indicator on the right of the table header isn't possible
-	// without re-laying it out; instead show "row X of N" inline above.
-	pos := styleMuted.Render(fmt.Sprintf("row %d of %d", m.promptCursor+1, total))
+	// Position indicator + active-filter hint
+	filter := "all"
+	if m.pendingOnly {
+		filter = fmt.Sprintf("pending-only (p to show all %d)", len(m.prompts))
+	}
+	pos := styleMuted.Render(fmt.Sprintf("row %d of %d · filter: %s",
+		m.promptCursor+1, total, filter))
 	out = append([]string{pos}, out...)
 
 	return strings.Join(out, "\n")
@@ -643,7 +688,7 @@ func (m tuiModel) footer() string {
 	var keys string
 	switch m.screen {
 	case screenPrompts:
-		keys = "↑↓ navigate · f/b page · g/G top/bottom · enter open · r refresh · q quit"
+		keys = "↑↓ nav · f/b page · g/G top/bot · enter open · p toggle pending-only · r refresh · q quit"
 	case screenReview:
 		if m.noteOpen {
 			keys = "type note · enter confirm · esc cancel"
