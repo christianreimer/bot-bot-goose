@@ -272,11 +272,34 @@ func loadPromptsCmd(ctx context.Context, d *db.DB) tea.Cmd {
 
 func loadSubsCmd(ctx context.Context, d *db.DB, promptID uuid.UUID) tea.Cmd {
 	return func() tea.Msg {
-		status := db.PrelaunchPending
+		// No Status filter: load every submission for the prompt so the
+		// reviewer can see what's already approved or rejected, not just
+		// the pending queue. ListPrelaunch returns rows ORDER BY
+		// consent_at DESC; we re-order in Go to put PENDING first
+		// (still the actionable bucket).
 		subs, err := d.ListPrelaunch(ctx, db.PrelaunchListOpts{
-			Status: &status, PromptID: &promptID, Limit: 200,
+			PromptID: &promptID, Limit: 200,
 		})
+		if err == nil {
+			sort.SliceStable(subs, func(i, j int) bool {
+				return statusRank(subs[i]) < statusRank(subs[j])
+			})
+		}
 		return subsLoadedMsg{promptID: promptID, subs: subs, err: err}
+	}
+}
+
+// statusRank orders submissions: pending (0) → approved (1) → rejected
+// (2). Used as the primary sort key so the actionable rows surface first
+// when the reviewer opens a prompt.
+func statusRank(s db.PrelaunchSubmission) int {
+	switch {
+	case s.IngestedDecoy != nil:
+		return 1
+	case s.RejectedAt != nil:
+		return 2
+	default:
+		return 0
 	}
 }
 
@@ -322,9 +345,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.subIndex = 0
 		m.currentPromptID = msg.promptID
 		if len(msg.subs) == 0 {
-			// Nothing pending for this prompt anymore — bounce back.
+			// No submissions of any status — nothing to look at.
 			m.screen = screenPrompts
-			m.flash = "no pending submissions for that prompt"
+			m.flash = "no submissions yet for that prompt"
 			m.flashAt = time.Now()
 			return m, loadPromptsCmd(m.ctx, m.db)
 		}
@@ -474,16 +497,15 @@ func (m tuiModel) handleKeyPrompts(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.promptCursor = 0
 		return m, nil
 	case "enter":
+		// Always allow opening so the reviewer can see what's already
+		// approved or rejected on this prompt, not just pending. The
+		// subs-loaded handler bounces back to the prompt list with a
+		// flash if the prompt has truly zero submissions of any kind.
 		visible := m.visiblePrompts()
 		if m.promptCursor >= len(visible) {
 			return m, nil
 		}
 		p := visible[m.promptCursor]
-		if p.Pending == 0 {
-			m.flash = "no pending submissions for that prompt"
-			m.flashAt = time.Now()
-			return m, nil
-		}
 		return m, loadSubsCmd(m.ctx, m.db, p.PromptID)
 	}
 	return m, nil
@@ -543,14 +565,27 @@ func (m tuiModel) handleKeyReview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	cur := m.subs[m.subIndex]
 	note := m.note.Value()
+	decided := cur.IngestedDecoy != nil || cur.RejectedAt != nil
 
 	switch msg.String() {
-	case "a":
-		return m, approveCmd(m.ctx, m.db, cur.ID, m.reviewerID, false, note)
-	case "t":
-		return m, approveCmd(m.ctx, m.db, cur.ID, m.reviewerID, true, note)
-	case "r":
-		return m, rejectCmd(m.ctx, m.db, cur.ID, m.reviewerID, note)
+	case "a", "t", "r":
+		if decided {
+			// Read-only: this row is already in moderation_reviews; the
+			// DB layer would refuse with ErrPrelaunchAlreadyDecided
+			// anyway. Surface that intent up here so the operator sees
+			// it immediately, no DB round-trip.
+			m.flash = styleMuted.Render("already decided — read-only")
+			m.flashAt = time.Now()
+			return m, nil
+		}
+		switch msg.String() {
+		case "a":
+			return m, approveCmd(m.ctx, m.db, cur.ID, m.reviewerID, false, note)
+		case "t":
+			return m, approveCmd(m.ctx, m.db, cur.ID, m.reviewerID, true, note)
+		case "r":
+			return m, rejectCmd(m.ctx, m.db, cur.ID, m.reviewerID, note)
+		}
 	case "s":
 		m.skipped++
 		m.flash = styleSkip.Render("skipped")
@@ -567,6 +602,11 @@ func (m tuiModel) handleKeyReview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "n":
+		if decided {
+			m.flash = styleMuted.Render("can't attach a note to a decided row")
+			m.flashAt = time.Now()
+			return m, nil
+		}
 		m.noteOpen = true
 		m.note.Focus()
 		return m, textinput.Blink
@@ -749,12 +789,38 @@ func decorate(label string, col sortColumn, m tuiModel) string {
 
 func (m tuiModel) viewReview() string {
 	if m.subIndex >= len(m.subs) {
-		return styleMuted.Render("no more pending submissions for this prompt")
+		return styleMuted.Render("no more submissions for this prompt")
 	}
 	cur := m.subs[m.subIndex]
 
-	progress := fmt.Sprintf("submission %d of %d pending for this prompt",
-		m.subIndex+1, len(m.subs))
+	// Count how many of each status are in this prompt's queue so the
+	// header reflects "pending 3 of 5 submissions · 1 approved, 1 rejected"
+	// — clearer than just "submission 3 of 5" when several have already
+	// been decided.
+	var pending, approved, rejected int
+	for _, s := range m.subs {
+		switch {
+		case s.IngestedDecoy != nil:
+			approved++
+		case s.RejectedAt != nil:
+			rejected++
+		default:
+			pending++
+		}
+	}
+	progress := fmt.Sprintf("submission %d of %d  ·  %d pending  %d approved  %d rejected",
+		m.subIndex+1, len(m.subs), pending, approved, rejected)
+
+	// Status badge on the current row.
+	var badge string
+	switch {
+	case cur.IngestedDecoy != nil:
+		badge = styleApprove.Render("[APPROVED]")
+	case cur.RejectedAt != nil:
+		badge = styleReject.Render("[REJECTED]")
+	default:
+		badge = styleMuted.Render("[PENDING]")
+	}
 
 	prompt := styleKick.Render("PROMPT") + "\n" +
 		stylePrompt.Render(cur.PromptText)
@@ -789,7 +855,7 @@ func (m tuiModel) viewReview() string {
 		styleMuted.Render(progress),
 		"",
 		prompt,
-		styleKick.Render("SUBMISSION"),
+		styleKick.Render("SUBMISSION") + "  " + badge,
 		subBox,
 		metaLine,
 		"",
@@ -804,9 +870,17 @@ func (m tuiModel) footer() string {
 	case screenPrompts:
 		keys = "↑↓ nav · f/b page · g/G top/bot · enter open · 1-5 sort · p toggle pending-only · r refresh · q quit"
 	case screenReview:
-		if m.noteOpen {
+		switch {
+		case m.noteOpen:
 			keys = "type note · enter confirm · esc cancel"
-		} else {
+		case m.subIndex < len(m.subs) && (m.subs[m.subIndex].IngestedDecoy != nil || m.subs[m.subIndex].RejectedAt != nil):
+			// Already-decided row: action keys are dimmed because the
+			// DB layer would refuse them anyway. Operator can still
+			// page through with s/u and back out with esc.
+			keys = styleMuted.Render("a/t/r disabled — already decided") + "  " +
+				styleSkip.Render("s next") + "  " +
+				"u prev  esc back  q quit"
+		default:
 			keys = styleApprove.Render("a approve") + "  " +
 				styleApprove.Render("t approve+trap") + "  " +
 				styleReject.Render("r reject") + "  " +
