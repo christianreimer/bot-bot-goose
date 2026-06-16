@@ -17,6 +17,11 @@
 //	bbg-admin prelaunch <list|show|review|bulk-review|prompts>
 //	bbg-admin stats   <overview|players|decoys|prelaunch>
 //
+// Interactive console:
+//
+//	bbg-admin tui    # review submissions, generate bot lines, assemble puzzles,
+//	                 # browse upcoming + history
+//
 // See cmd/admin/README.md for the JSON shapes and the DigitalOcean connection
 // recipe.
 package main
@@ -67,6 +72,8 @@ func main() {
 		mustRun(log, runBot)
 	case "stats":
 		mustRun(log, runStats)
+	case "tui":
+		mustRun(log, runTUI)
 	default:
 		usage()
 		os.Exit(2)
@@ -88,6 +95,9 @@ func usage() {
   prompt     Manage prompts (list/show/create/edit/retire/delete/supply).
   prelaunch    Review /prelaunch submissions in pre_launch_submissions (list/show/review/bulk-review/prompts).
   stats      Usage reporting (overview/players/decoys/prelaunch).
+  tui        Interactive console (bubbletea): review submissions, generate bot lines,
+             assemble puzzles, browse upcoming + history. Reads BBG_REVIEWER_EMAIL,
+             BBG_DB_URL, BBG_ANTHROPIC_API_KEY.
 
 See cmd/admin/README.md for JSON output shapes and the DigitalOcean connection recipe.`)
 }

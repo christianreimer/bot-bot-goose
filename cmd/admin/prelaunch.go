@@ -36,8 +36,6 @@ func runPrelaunch(ctx context.Context, log *slog.Logger) error {
 		return prelaunchBulkReview(ctx, log)
 	case "prompts":
 		return prelaunchPrompts(ctx, log)
-	case "tui":
-		return runPrelaunchTUI(ctx, log)
 	default:
 		prelaunchUsage()
 		os.Exit(2)
@@ -52,7 +50,9 @@ func prelaunchUsage() {
   review       Decide one submission (approve | reject).
   bulk-review  Apply the same decision to many submissions at once.
   prompts      Per-prompt rollup of pending / ingested / rejected counts.
-  tui          Interactive review TUI — bubbletea fullscreen.`)
+
+For the interactive console (formerly "prelaunch tui"), use:
+  bbg-admin tui`)
 }
 
 // --- list --------------------------------------------------------------------

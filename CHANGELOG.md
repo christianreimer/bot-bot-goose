@@ -6,6 +6,11 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 Tracked in [BACKLOG.md](BACKLOG.md). Most prominent: moderation queue UI, magic-link auth, AI-detection on submissions, slot E/P/B bandit in the composer.
 
+### Changed — `bbg-admin prelaunch tui` → `bbg-admin tui`
+
+- The interactive console was promoted to a top-level subcommand because it now spans more than prelaunch review: it also generates bot lines, assembles puzzles, and browses upcoming + history. Hard rename — no alias; the old path errors with `unknown subcommand`.
+- File renamed: `cmd/admin/tui_prelaunch.go` → `cmd/admin/tui.go` (git mv, history preserved). Function renamed: `runPrelaunchTUI` → `runTUI`.
+
 ### Removed — `is_trap` boolean (migration 0002_drop_is_trap)
 
 - Dropped `decoy_submissions.is_trap` and `puzzle_round_answers.is_trap`. The flag was plumbed through schema, admin CLI (`--is-trap` on prelaunch review + bulk-review), and the review TUI's `t` (approve+trap) key, but no game logic ever consumed it.

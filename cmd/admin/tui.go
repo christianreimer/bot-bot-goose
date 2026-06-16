@@ -1,6 +1,6 @@
-// Interactive prelaunch review + puzzle authoring TUI built on bubbletea
-// + lipgloss. Tab cycles three top-level modes: REVIEW → UPCOMING →
-// HISTORY → REVIEW.
+// Interactive bbg-admin console built on bubbletea + lipgloss. Invoked
+// as `bbg-admin tui`. Tab cycles three top-level modes: REVIEW →
+// UPCOMING → HISTORY → REVIEW.
 //
 // REVIEW mode (default):
 //
@@ -224,8 +224,8 @@ type tuiModel struct {
 
 // --- runner -----------------------------------------------------------------
 
-func runPrelaunchTUI(ctx context.Context, log *slog.Logger) error {
-	fs := flag.NewFlagSet("prelaunch tui", flag.ExitOnError)
+func runTUI(ctx context.Context, log *slog.Logger) error {
+	fs := flag.NewFlagSet("tui", flag.ExitOnError)
 	dbf := registerDBFlags(fs)
 	reviewerEmail := fs.String("reviewer-email",
 		envOr("BBG_REVIEWER_EMAIL", ""),
