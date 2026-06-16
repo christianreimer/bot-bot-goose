@@ -30,6 +30,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"os"
 	"sort"
 	"strings"
@@ -38,7 +39,10 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/christianreimer/bot-bot-goose/internal/content"
 	"github.com/christianreimer/bot-bot-goose/internal/db"
+	"github.com/christianreimer/bot-bot-goose/internal/llm"
+	"github.com/christianreimer/bot-bot-goose/internal/puzzle"
 	"github.com/google/uuid"
 )
 
@@ -166,6 +170,15 @@ type tuiModel struct {
 	// note input (toggled with 'n')
 	note     textinput.Model
 	noteOpen bool
+
+	// bot-line build state — populated after the reviewer has approved
+	// ≥3 humans on the current prompt. The reviewer drives it with g
+	// (generate), y (accept), e (edit), m (make puzzle).
+	llmClient   *llm.Client
+	llmInitErr  error
+	generating  bool
+	botPending  *generatedBot // non-nil once a candidate is in hand
+	botAccepted bool          // true after y → InsertApprovedBotLine
 
 	// session stats
 	approved int
@@ -304,6 +317,21 @@ func statusRank(s db.PrelaunchSubmission) int {
 	}
 }
 
+// generatedBot is the in-memory state of a bot line awaiting reviewer
+// decision. Promoted to bot_candidates only when the reviewer presses y.
+// archetypeID is resolved up-front (via ArchetypeBySlug) so the accept
+// path doesn't hit the DB twice.
+type generatedBot struct {
+	text          string
+	archetypeID   uuid.UUID
+	archetypeSlug string
+	archetypeName string
+	llmModel      string
+	// botID is populated once accepted and persisted; "Make puzzle"
+	// passes it into ComposeRoundAnswersExplicit.
+	botID uuid.UUID
+}
+
 func approveCmd(ctx context.Context, d *db.DB, prelaunchID, reviewerID uuid.UUID, isTrap bool, note string) tea.Cmd {
 	return func() tea.Msg {
 		_, err := d.ApprovePrelaunch(ctx, prelaunchID, reviewerID, isTrap, note)
@@ -316,6 +344,125 @@ func rejectCmd(ctx context.Context, d *db.DB, prelaunchID, reviewerID uuid.UUID,
 		err := d.RejectPrelaunch(ctx, prelaunchID, reviewerID, note)
 		return decisionDoneMsg{decision: "rejected", err: err}
 	}
+}
+
+// --- build-flow messages + commands -----------------------------------------
+
+type botGeneratedMsg struct {
+	bot *generatedBot
+	err error
+}
+
+type botAcceptedMsg struct {
+	botID uuid.UUID
+	err   error
+}
+
+type assembledMsg struct {
+	puzzleNumber int32
+	puzzleDate   time.Time
+	roundIndex   int
+	sealed       bool
+	err          error
+}
+
+// generateBotCmd dispatches one LLM call. The archetype is picked at the
+// caller (so it's stable across regenerate cycles if the reviewer wants
+// to re-run the same voice) and the resolved archetype id flows through
+// so the accept path doesn't re-query.
+func generateBotCmd(ctx context.Context, client *llm.Client, req llm.BotLineRequest, archetypeID uuid.UUID, archetypeSlug string) tea.Cmd {
+	return func() tea.Msg {
+		res, err := client.GenerateBotLine(ctx, req)
+		if err != nil {
+			return botGeneratedMsg{err: err}
+		}
+		return botGeneratedMsg{bot: &generatedBot{
+			text:          res.Text,
+			archetypeID:   archetypeID,
+			archetypeSlug: archetypeSlug,
+			archetypeName: req.ArchetypeName,
+			llmModel:      res.Model,
+		}}
+	}
+}
+
+// acceptBotCmd persists the in-memory candidate as an approved
+// bot_candidates row. Returns the new bot id which is later passed to
+// the round-assembly step.
+func acceptBotCmd(ctx context.Context, d *db.DB, promptID, archetypeID uuid.UUID, text, llmModel string) tea.Cmd {
+	return func() tea.Msg {
+		id, err := d.InsertApprovedBotLine(ctx, promptID, archetypeID, text, llmModel)
+		return botAcceptedMsg{botID: id, err: err}
+	}
+}
+
+// assembleRoundCmd fills the next open round of the next open puzzle.
+// Concretely:
+//   1. Find or create the puzzle with < 3 rounds.
+//   2. Insert puzzle_rounds at index = rounds-filled-so-far.
+//   3. Compose 1 bot + 3 decoy answers (validated against the approved pool).
+//   4. Write them via ReplaceRoundAnswers.
+// When the just-filled round was index 2, the puzzle is now sealed.
+func assembleRoundCmd(ctx context.Context, d *db.DB, promptID, botID uuid.UUID, decoyIDs []uuid.UUID) tea.Cmd {
+	return func() tea.Msg {
+		op, err := d.FindOrCreateOpenPuzzle(ctx)
+		if err != nil {
+			return assembledMsg{err: fmt.Errorf("find open puzzle: %w", err)}
+		}
+		roundIdx := int16(op.RoundsFilled)
+		roundID, err := d.InsertPuzzleRound(ctx, op.ID, roundIdx, promptID, 1)
+		if err != nil {
+			return assembledMsg{err: fmt.Errorf("insert round: %w", err)}
+		}
+		answers, err := puzzle.ComposeRoundAnswersExplicit(ctx, d, promptID, []uuid.UUID{botID}, decoyIDs)
+		if err != nil {
+			return assembledMsg{err: fmt.Errorf("compose answers: %w", err)}
+		}
+		if err := d.ReplaceRoundAnswers(ctx, roundID, answers); err != nil {
+			return assembledMsg{err: fmt.Errorf("write answers: %w", err)}
+		}
+		return assembledMsg{
+			puzzleNumber: op.PuzzleNumber,
+			puzzleDate:   op.PuzzleDate,
+			roundIndex:   int(roundIdx),
+			sealed:       op.RoundsFilled == 2,
+		}
+	}
+}
+
+// approvedDecoyIDsForPrompt returns the IDs of approved decoys produced
+// by prelaunch ingestion of this prompt's submissions, in submission
+// order. Used to grab the first 3 the reviewer approved when "Make
+// puzzle" fires.
+func approvedDecoyIDsForPrompt(subs []db.PrelaunchSubmission) []uuid.UUID {
+	out := make([]uuid.UUID, 0, len(subs))
+	for _, s := range subs {
+		if s.IngestedDecoy != nil {
+			out = append(out, *s.IngestedDecoy)
+		}
+	}
+	return out
+}
+
+// approvedHumanTextsForPrompt mirrors approvedDecoyIDsForPrompt but
+// returns the texts — fed to the LLM as "hide-among-these" context.
+func approvedHumanTextsForPrompt(subs []db.PrelaunchSubmission) []string {
+	out := make([]string, 0, len(subs))
+	for _, s := range subs {
+		if s.IngestedDecoy != nil {
+			out = append(out, s.Text)
+		}
+	}
+	return out
+}
+
+// pickArchetype returns a random archetype from the starter roster. The
+// TUI picks one per generate call; regenerate re-rolls. Difficulty 5
+// (Mirror) is included — the model is just told its tell, the actual
+// pool-trained behavior is on the bot-candidates batch generator's TODO.
+func pickArchetype() content.Archetype {
+	roster := content.StarterRoster
+	return roster[rand.IntN(len(roster))]
 }
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -345,6 +492,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.subs = msg.subs
 		m.subIndex = 0
 		m.currentPromptID = msg.promptID
+		// Fresh prompt: clear any build state left over from a previous
+		// prompt the reviewer was working on.
+		m.botPending = nil
+		m.botAccepted = false
+		m.generating = false
 		if len(msg.subs) == 0 {
 			// No submissions of any status — nothing to look at.
 			m.screen = screenPrompts
@@ -354,6 +506,57 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.screen = screenReview
 		return m, nil
+
+	case botGeneratedMsg:
+		m.generating = false
+		if msg.err != nil {
+			m.flash = styleReject.Render("llm: " + msg.err.Error())
+			m.flashAt = time.Now()
+			return m, nil
+		}
+		m.botPending = msg.bot
+		m.botAccepted = false
+		m.flash = styleKick.Render("bot generated (" + msg.bot.archetypeName + ")")
+		m.flashAt = time.Now()
+		return m, nil
+
+	case botAcceptedMsg:
+		if msg.err != nil {
+			m.flash = styleReject.Render("accept bot: " + msg.err.Error())
+			m.flashAt = time.Now()
+			return m, nil
+		}
+		if m.botPending != nil {
+			m.botPending.botID = msg.botID
+		}
+		m.botAccepted = true
+		m.flash = styleApprove.Render("bot accepted — press m to assemble")
+		m.flashAt = time.Now()
+		return m, nil
+
+	case assembledMsg:
+		if msg.err != nil {
+			m.flash = styleReject.Render("assemble: " + msg.err.Error())
+			m.flashAt = time.Now()
+			return m, nil
+		}
+		if msg.sealed {
+			m.flash = styleApprove.Render(fmt.Sprintf("puzzle #%d sealed (3/3) · serves %s",
+				msg.puzzleNumber, msg.puzzleDate.Format("2006-01-02")))
+		} else {
+			m.flash = styleApprove.Render(fmt.Sprintf("puzzle #%d round %d/3 · %s",
+				msg.puzzleNumber, msg.roundIndex+1, msg.puzzleDate.Format("2006-01-02")))
+		}
+		m.flashAt = time.Now()
+		// Round committed — prompt is now locked. Reset build state
+		// and bounce back to the prompt list (which excludes locked).
+		m.botPending = nil
+		m.botAccepted = false
+		m.generating = false
+		m.subs = nil
+		m.subIndex = 0
+		m.screen = screenPrompts
+		return m, loadPromptsCmd(m.ctx, m.db)
 
 	case decisionDoneMsg:
 		if msg.err != nil {
@@ -588,7 +791,7 @@ func (m tuiModel) handleKeyReview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.subIndex--
 		}
 		return m, nil
-	case "g", "home":
+	case "home":
 		m.subIndex = 0
 		return m, nil
 	case "G", "end":
@@ -617,6 +820,82 @@ func (m tuiModel) handleKeyReview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.noteOpen = true
 		m.note.Focus()
 		return m, textinput.Blink
+
+	// --- build-flow keys ------------------------------------------------
+	case "g":
+		// Generate (or regenerate) a bot line. Gate: ≥3 approved humans.
+		approved := approvedDecoyIDsForPrompt(m.subs)
+		if len(approved) < 3 {
+			m.flash = styleMuted.Render(fmt.Sprintf("need 3 approved humans first (have %d)", len(approved)))
+			m.flashAt = time.Now()
+			return m, nil
+		}
+		if m.generating {
+			m.flash = styleMuted.Render("already generating…")
+			m.flashAt = time.Now()
+			return m, nil
+		}
+		if m.llmClient == nil {
+			c, err := llm.NewFromEnv()
+			if err != nil {
+				m.llmInitErr = err
+				m.flash = styleReject.Render("llm: " + err.Error())
+				m.flashAt = time.Now()
+				return m, nil
+			}
+			m.llmClient = c
+		}
+		a := pickArchetype()
+		archID, err := m.db.ArchetypeBySlug(m.ctx, a.Slug)
+		if err != nil {
+			m.flash = styleReject.Render("archetype lookup: " + err.Error())
+			m.flashAt = time.Now()
+			return m, nil
+		}
+		// Regenerate clears any pending/accepted bot — re-running the
+		// LLM means the reviewer wants a different line.
+		m.botPending = nil
+		m.botAccepted = false
+		m.generating = true
+		m.flash = styleKick.Render("generating (" + a.Name + ")…")
+		m.flashAt = time.Now()
+		req := llm.BotLineRequest{
+			Prompt:              cur.PromptText,
+			ArchetypeName:       a.Name,
+			ArchetypeTell:       a.Tell,
+			ArchetypeDifficulty: a.Difficulty,
+			HumanLines:          approvedHumanTextsForPrompt(m.subs),
+		}
+		return m, generateBotCmd(m.ctx, m.llmClient, req, archID, a.Slug)
+
+	case "y":
+		if m.botPending == nil {
+			m.flash = styleMuted.Render("no bot line — press g to generate")
+			m.flashAt = time.Now()
+			return m, nil
+		}
+		if m.botAccepted {
+			m.flash = styleMuted.Render("bot already accepted — press m to assemble")
+			m.flashAt = time.Now()
+			return m, nil
+		}
+		return m, acceptBotCmd(m.ctx, m.db, cur.PromptID,
+			m.botPending.archetypeID, m.botPending.text, m.botPending.llmModel)
+
+	case "m":
+		// Make puzzle: 3 approved humans + 1 accepted bot → assemble.
+		approved := approvedDecoyIDsForPrompt(m.subs)
+		if len(approved) < 3 {
+			m.flash = styleMuted.Render(fmt.Sprintf("need 3 approved humans (have %d)", len(approved)))
+			m.flashAt = time.Now()
+			return m, nil
+		}
+		if !m.botAccepted || m.botPending == nil || m.botPending.botID == uuid.Nil {
+			m.flash = styleMuted.Render("need an accepted bot line (g, then y)")
+			m.flashAt = time.Now()
+			return m, nil
+		}
+		return m, assembleRoundCmd(m.ctx, m.db, cur.PromptID, m.botPending.botID, approved[:3])
 	}
 	return m, nil
 }
@@ -905,7 +1184,57 @@ func (m tuiModel) viewReview() string {
 	}
 	parts = append(parts, listLines...)
 	parts = append(parts, "", subBox, metaLine, "", noteLine)
+	// Bot section only appears once the human-line gate is met (≥3
+	// approved). Below that, the reviewer's job is still selection;
+	// surfacing the generate key earlier would invite premature
+	// generation against a not-yet-curated pool.
+	if approved >= 3 {
+		parts = append(parts, "", m.viewBotSection(approved))
+	}
 	return strings.Join(parts, "\n")
+}
+
+// viewBotSection renders the bot-line region of the review screen. Three
+// states:
+//   - none: prompt to press `g` (with the LLM model id)
+//   - generating: "calling LLM…"
+//   - pending: model output + accept/regenerate/edit keys
+//   - accepted: confirmed + invitation to press `m`
+//
+// `approvedHumans` is passed in so the section can show the make-puzzle
+// readiness line without recounting.
+func (m tuiModel) viewBotSection(approvedHumans int) string {
+	header := styleKick.Render("BOT LINE")
+	if m.llmInitErr != nil {
+		return header + "\n" + styleReject.Render("llm unavailable: "+m.llmInitErr.Error())
+	}
+	if m.generating {
+		return header + "\n" + styleMuted.Render("calling LLM…")
+	}
+	if m.botPending == nil {
+		model := llm.DefaultModel
+		if m.llmClient != nil {
+			model = m.llmClient.Model()
+		}
+		return header + "\n" + styleMuted.Render("(none — press g to generate with "+model+")")
+	}
+
+	subhead := fmt.Sprintf("%s · %s",
+		styleMuted.Render(m.botPending.archetypeName),
+		styleMuted.Render(m.botPending.llmModel))
+	box := styleSub.Width(maxInt(m.width-2, 40)).Render(m.botPending.text)
+
+	var status, ready string
+	if m.botAccepted {
+		status = styleApprove.Render("✓ accepted")
+		ready = fmt.Sprintf("%s · press %s to assemble into the next round",
+			styleApprove.Render(fmt.Sprintf("READY: %d/3 humans · 1/1 bot", approvedHumans)),
+			styleKick.Render("m"))
+	} else {
+		status = styleKick.Render("press: y accept · g regenerate")
+		ready = styleMuted.Render(fmt.Sprintf("not ready: %d/3 humans · bot not yet accepted", approvedHumans))
+	}
+	return strings.Join([]string{header + "  " + subhead, status, box, ready}, "\n")
 }
 
 // approvedCounter renders the approved count with reed (green) once the
@@ -934,22 +1263,36 @@ func (m tuiModel) footer() string {
 	case screenPrompts:
 		keys = "↑↓ nav · f/b page · g/G top/bot · enter open · 1-5 sort · p toggle pending-only · r refresh · q quit"
 	case screenReview:
+		// Build-mode keys show up once 3+ humans are approved on this
+		// prompt — that's when the bot section becomes interactive.
+		approvedH := 0
+		for _, s := range m.subs {
+			if s.IngestedDecoy != nil {
+				approvedH++
+			}
+		}
+		buildKeys := ""
+		if approvedH >= 3 {
+			buildKeys = "  " + styleKick.Render("g gen") + "  " +
+				styleKick.Render("y accept") + "  " +
+				styleApprove.Render("m make puzzle")
+		}
 		switch {
 		case m.noteOpen:
 			keys = "type note · enter confirm · esc cancel"
 		case m.subIndex < len(m.subs) && (m.subs[m.subIndex].IngestedDecoy != nil || m.subs[m.subIndex].RejectedAt != nil):
 			// Cursor row is already decided: a/t/r are no-ops because
-			// reversal is not yet supported. Navigation keys still work
-			// so the reviewer can move to a pending row.
+			// reversal is not yet supported. Navigation still works,
+			// and the build keys are still live (they're per-prompt,
+			// not per-row).
 			keys = "↑↓ nav  " +
-				styleMuted.Render("a/t/r disabled (already decided)") + "  " +
-				"esc back  q quit"
+				styleMuted.Render("a/t/r disabled (already decided)") + buildKeys + "  esc back  q quit"
 		default:
 			keys = "↑↓ nav  " +
 				styleApprove.Render("a approve") + "  " +
-				styleApprove.Render("t approve+trap") + "  " +
+				styleApprove.Render("t trap") + "  " +
 				styleReject.Render("r reject") + "  " +
-				"n note  esc back  q quit"
+				"n note" + buildKeys + "  esc back  q quit"
 		}
 	}
 	flash := ""

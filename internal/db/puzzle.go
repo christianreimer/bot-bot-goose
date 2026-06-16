@@ -278,6 +278,93 @@ func (d *DB) InsertBotCandidate(ctx context.Context, promptID, archetypeID uuid.
 	return id, err
 }
 
+// InsertApprovedBotLine writes one LLM-generated bot line into bot_candidates
+// with status='approved' and the model id recorded. Used by the prelaunch
+// review TUI's "g (generate) → a (accept)" flow — the reviewer is the
+// approval gate, so there's no pending stage.
+func (d *DB) InsertApprovedBotLine(ctx context.Context, promptID, archetypeID uuid.UUID, text, llmModel string) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := d.QueryRow(ctx, `
+		INSERT INTO bot_candidates (prompt_id, archetype_id, text, llm_model, status)
+		VALUES ($1, $2, $3, $4, 'approved')
+		RETURNING id
+	`, promptID, archetypeID, text, llmModel).Scan(&id)
+	return id, err
+}
+
+// ArchetypeBySlug looks up an archetype by its stable slug. Returns
+// ErrNotFound if the slug isn't seeded. The TUI uses this to resolve the
+// archetype id at bot-line generation time without round-tripping through
+// UpsertArchetype (which would mass-overwrite the archetype's fields).
+func (d *DB) ArchetypeBySlug(ctx context.Context, slug string) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := d.QueryRow(ctx, `SELECT id FROM archetypes WHERE slug = $1`, slug).Scan(&id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return uuid.Nil, ErrNotFound
+		}
+		return uuid.Nil, err
+	}
+	return id, nil
+}
+
+// OpenPuzzle is the in-flight daily_puzzle the TUI's "Make puzzle" action
+// fills the next round of. RoundsFilled in {0,1,2} indicates how many rounds
+// are already committed; the next round_index to write is RoundsFilled.
+type OpenPuzzle struct {
+	ID           uuid.UUID
+	PuzzleNumber int32
+	PuzzleDate   time.Time
+	RoundsFilled int
+}
+
+// FindOrCreateOpenPuzzle returns the daily_puzzle that has < 3 rounds
+// (one is already being assembled, or no puzzle has been started yet).
+// When no open puzzle exists, creates a new one with the next available
+// puzzle_number and puzzle_date = max(existing puzzle_date) + 1 day, or
+// tomorrow if the table is empty. Idempotent in the open-puzzle case
+// (re-running returns the same row).
+//
+// Concurrency note: not transactional with the round-insert that follows.
+// In single-reviewer TUI use this is fine; if two reviewers raced we'd
+// risk both creating new puzzles. Accept that for now — there's exactly
+// one operator at v1.
+func (d *DB) FindOrCreateOpenPuzzle(ctx context.Context) (OpenPuzzle, error) {
+	var out OpenPuzzle
+	err := d.QueryRow(ctx, `
+		SELECT dp.id, dp.puzzle_number, dp.puzzle_date,
+		       (SELECT COUNT(*) FROM puzzle_rounds pr WHERE pr.daily_puzzle_id = dp.id)
+		  FROM daily_puzzles dp
+		 WHERE (SELECT COUNT(*) FROM puzzle_rounds pr WHERE pr.daily_puzzle_id = dp.id) < 3
+		 ORDER BY dp.puzzle_number ASC
+		 LIMIT 1
+	`).Scan(&out.ID, &out.PuzzleNumber, &out.PuzzleDate, &out.RoundsFilled)
+	if err == nil {
+		return out, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return OpenPuzzle{}, err
+	}
+	nn, err := d.NextPuzzleNumber(ctx)
+	if err != nil {
+		return OpenPuzzle{}, err
+	}
+	var nextDate time.Time
+	err = d.QueryRow(ctx, `
+		SELECT COALESCE(MAX(puzzle_date) + INTERVAL '1 day',
+		                CURRENT_DATE + INTERVAL '1 day')::date
+		  FROM daily_puzzles
+	`).Scan(&nextDate)
+	if err != nil {
+		return OpenPuzzle{}, err
+	}
+	pid, err := d.InsertDailyPuzzle(ctx, nn, nextDate, nil)
+	if err != nil {
+		return OpenPuzzle{}, err
+	}
+	return OpenPuzzle{ID: pid, PuzzleNumber: nn, PuzzleDate: nextDate, RoundsFilled: 0}, nil
+}
+
 // InsertDecoy inserts a (typically pending) decoy. user_id may be nil for seed content.
 func (d *DB) InsertDecoy(ctx context.Context, promptID uuid.UUID, userID *uuid.UUID, text, status string) (uuid.UUID, error) {
 	var id uuid.UUID
