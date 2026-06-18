@@ -18,7 +18,7 @@ RUN go build -trimpath -ldflags="-s -w" -o /out/bbg ./cmd/server \
  && go build -trimpath -ldflags="-s -w" -o /out/bbg-og-render ./cmd/og-render \
  && go build -trimpath -ldflags="-s -w" -o /out/bbg-admin ./cmd/admin
 
-FROM alpine:3.20
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates tzdata postgresql16-client
 WORKDIR /app
 
